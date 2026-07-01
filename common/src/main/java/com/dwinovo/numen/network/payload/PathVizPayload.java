@@ -3,29 +3,25 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.path.ClientPathViz;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Server → Client: the companion's current pathfinding plan, for the in-world
  * path overlay (Baritone's {@code PathRenderer}, ported to our server-authored
- * model). Baritone renders client-side from its own {@code PathingBehavior};
- * our path lives on the server, so the body pushes it to the owner whenever it
- * (re)plans a segment, and pushes an EMPTY one (all lists empty, no goal) to
- * clear the overlay when the path ends.
+ * model). The body pushes it to the owner whenever it (re)plans a segment, and
+ * pushes an EMPTY one (all lists empty) to clear the overlay when the path ends.
  *
  * <ul>
  *   <li>{@code nodes} — the path positions (feet cells); drawn as a red poly-line.</li>
  *   <li>{@code toBreak} — blocks the path will dig; drawn as red boxes.</li>
  *   <li>{@code toPlace} — scaffold blocks the path will place; drawn as green boxes.</li>
- *   <li>{@code goal} — the goal cell; drawn as a green box (absent while clearing).</li>
+ *   <li>{@code targets} — the goal cell(s); drawn as green boxes.</li>
  * </ul>
  */
 public record PathVizPayload(UUID companion,
@@ -38,22 +34,45 @@ public record PathVizPayload(UUID companion,
     /** Cap per list — paths are trimmed well below this; defends against absurd input. */
     public static final int MAX = 512;
 
-    public static final Type<PathVizPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "path_viz"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, PathVizPayload> STREAM_CODEC =
-            StreamCodec.composite(
-                    UUIDUtil.STREAM_CODEC, PathVizPayload::companion,
-                    ResourceLocation.STREAM_CODEC, PathVizPayload::dimension,
-                    BlockPos.STREAM_CODEC.apply(ByteBufCodecs.list(MAX)), PathVizPayload::nodes,
-                    BlockPos.STREAM_CODEC.apply(ByteBufCodecs.list(MAX)), PathVizPayload::toBreak,
-                    BlockPos.STREAM_CODEC.apply(ByteBufCodecs.list(MAX)), PathVizPayload::toPlace,
-                    BlockPos.STREAM_CODEC.apply(ByteBufCodecs.list(MAX)), PathVizPayload::targets,
-                    PathVizPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "path_viz");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeUUID(companion);
+        buf.writeResourceLocation(dimension);
+        writeList(buf, nodes);
+        writeList(buf, toBreak);
+        writeList(buf, toPlace);
+        writeList(buf, targets);
+    }
+
+    public static PathVizPayload read(FriendlyByteBuf buf) {
+        UUID companion = buf.readUUID();
+        ResourceLocation dimension = buf.readResourceLocation();
+        return new PathVizPayload(companion, dimension,
+                readList(buf), readList(buf), readList(buf), readList(buf));
+    }
+
+    private static void writeList(FriendlyByteBuf buf, List<BlockPos> list) {
+        int n = Math.min(list.size(), MAX);
+        buf.writeVarInt(n);
+        for (int i = 0; i < n; i++) {
+            buf.writeBlockPos(list.get(i));
+        }
+    }
+
+    private static List<BlockPos> readList(FriendlyByteBuf buf) {
+        int n = Math.min(buf.readVarInt(), MAX);
+        List<BlockPos> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            list.add(buf.readBlockPos());
+        }
+        return list;
     }
 
     /** Client-side handler. Runs on the client main thread (network layer arranges that). */

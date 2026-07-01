@@ -29,6 +29,7 @@ import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 
@@ -678,11 +679,11 @@ public final class NumenScreen extends Screen {
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
         // Wheel over the left rail column scrolls the roster (works on any tab).
         if (sy != 0 && mx >= railX && mx < railX + RAIL_W && maxRailScroll() > 0) {
-            railScroll = Math.clamp((long) (railScroll - sy), 0, maxRailScroll());
+            railScroll = Mth.clamp((int) (railScroll - sy), 0, maxRailScroll());
             return true;
         }
         if (tab == Tab.CHAT && sy != 0) {
-            scroll = Math.clamp((long) (scroll - sy * LINE_H * 3), 0, lastMaxScroll);
+            scroll = Mth.clamp((int) (scroll - sy * LINE_H * 3), 0, lastMaxScroll);
             pinBottom = scroll >= lastMaxScroll;
             return true;
         }
@@ -780,7 +781,7 @@ public final class NumenScreen extends Screen {
     private void renderRail(GuiGraphics g, int mouseX, int mouseY) {
         List<NumenRoster.Entry> entries = NumenRoster.instance().entries();
         int ax = railX + (RAIL_W - RAIL_AV) / 2;
-        railScroll = Math.clamp(railScroll, 0, maxRailScroll());     // keep valid as the roster grows/shrinks
+        railScroll = Mth.clamp(railScroll, 0, maxRailScroll());     // keep valid as the roster grows/shrinks
         int first = railScroll;
         int startY = railStartY();
         for (int i = first; i < entries.size(); i++) {
@@ -861,7 +862,7 @@ public final class NumenScreen extends Screen {
     private UUID railCloseAt(int mx, int my) {
         int ax = railX + (RAIL_W - RAIL_AV) / 2;
         List<NumenRoster.Entry> entries = NumenRoster.instance().entries();
-        int first = Math.clamp(railScroll, 0, maxRailScroll());
+        int first = Mth.clamp(railScroll, 0, maxRailScroll());
         int startY = railStartY();
         for (int i = first; i < entries.size(); i++) {
             int ay = startY + (i - first) * RAIL_SLOT;
@@ -897,7 +898,7 @@ public final class NumenScreen extends Screen {
         int ax = railX + (RAIL_W - RAIL_AV) / 2;
         if (mx < ax || mx >= ax + RAIL_AV) return -1;
         List<NumenRoster.Entry> entries = NumenRoster.instance().entries();
-        int first = Math.clamp(railScroll, 0, maxRailScroll());
+        int first = Mth.clamp(railScroll, 0, maxRailScroll());
         int startY = railStartY();
         for (int i = first; i < entries.size(); i++) {
             int ay = startY + (i - first) * RAIL_SLOT;
@@ -995,7 +996,7 @@ public final class NumenScreen extends Screen {
         int contentH = rows.size() * LINE_H;
         lastMaxScroll = Math.max(0, contentH - viewH);
         if (pinBottom) scroll = lastMaxScroll;
-        scroll = Math.clamp((long) scroll, 0, lastMaxScroll);
+        scroll = Mth.clamp(scroll, 0, lastMaxScroll);
 
         g.enableScissor(transX, bodyY, transX + transW, bodyBottom);
         int y = bodyY - scroll;
@@ -1040,21 +1041,20 @@ public final class NumenScreen extends Screen {
         Set<String> failed = failedIds();
         List<LlmToolCall> group = new ArrayList<>();        // a run of consecutive tool calls
         for (ConvoState.Msg msg : loop().convo().snapshot()) {
-            switch (msg) {
-                case ConvoState.Msg.User u -> {
-                    flushTools(out, group, done, failed, width);
-                    wrapPlain(out, u.content(), YOU, width);     // user = teal body, no label
+            // Java 17: instanceof chain in place of a Java 21 sealed pattern switch.
+            if (msg instanceof ConvoState.Msg.User u) {
+                flushTools(out, group, done, failed, width);
+                wrapPlain(out, u.content(), YOU, width);     // user = teal body, no label
+            } else if (msg instanceof ConvoState.Msg.Assistant a) {
+                AssistantTurn turn = a.turn();
+                if (turn.content() != null && !turn.content().isBlank()) {
+                    flushTools(out, group, done, failed, width);   // spoken reply breaks the fold
+                    addHeader(out, name, AI, width);         // bold name header on its OWN line
+                    wrapPlain(out, turn.content(), AI, width);
                 }
-                case ConvoState.Msg.Assistant a -> {
-                    AssistantTurn turn = a.turn();
-                    if (turn.content() != null && !turn.content().isBlank()) {
-                        flushTools(out, group, done, failed, width);   // spoken reply breaks the fold
-                        addHeader(out, name, AI, width);         // bold name header on its OWN line
-                        wrapPlain(out, turn.content(), AI, width);
-                    }
-                    group.addAll(turn.toolCalls());
-                }
-                case ConvoState.Msg.Tool ignored -> { /* result drives done/fail, not a row */ }
+                group.addAll(turn.toolCalls());
+            } else if (msg instanceof ConvoState.Msg.Tool) {
+                /* result drives done/fail, not a row */
             }
         }
         flushTools(out, group, done, failed, width);

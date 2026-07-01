@@ -1,36 +1,36 @@
 package com.dwinovo.numen.platform;
 
 import com.dwinovo.numen.platform.services.INumenConfig;
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
- * NeoForge implementation of {@link INumenConfig}. Backed by a
- * {@code ModConfigSpec} that NeoForge serialises as TOML under
- * {@code <gameDir>/config/numen-common.toml}. Editable in-game via
- * NeoForge's built-in config screen (Mods → Numen → Config).
+ * Forge implementation of {@link INumenConfig}. Backed by a
+ * {@link ForgeConfigSpec} that Forge serialises as TOML under
+ * {@code <gameDir>/config/numen-common.toml}. Editable in-game via Forge's
+ * built-in config screen (Mods → Numen → Config).
  *
  * <h2>Registration timing</h2>
- * The static {@link #SPEC} is constructed during class load (just data —
- * no I/O), so it's safe to reference from the Mod constructor. The Mod
- * registers the spec via {@code ModContainer.registerConfig(...)}; NeoForge
+ * The static {@link #SPEC} is constructed during class load (just data — no
+ * I/O), so it's safe to reference from the Mod constructor. {@code NumenMod}
+ * registers the spec via {@code ModLoadingContext.registerConfig(...)}; Forge
  * loads / writes the TOML when the world loads.
  *
- * <p>Calling {@link ModConfigSpec.ConfigValue#get()} before the spec has
- * been loaded returns the declared default, so reads from this class are
- * safe at any point after {@code SPEC} is registered.
+ * <p>This is a straight port of the NeoForge {@code ModConfigSpec} variant —
+ * Forge's {@code ForgeConfigSpec} exposes the identical builder API, only the
+ * class name differs.
  */
-public final class NeoForgeNumenConfig implements INumenConfig {
+public final class ForgeNumenConfig implements INumenConfig {
 
-    public static final ModConfigSpec.ConfigValue<String> API_KEY;
-    public static final ModConfigSpec.ConfigValue<String> BASE_URL;
-    public static final ModConfigSpec.ConfigValue<String> MODEL;
-    public static final ModConfigSpec.ConfigValue<String> PROVIDER;
-    public static final ModConfigSpec.ConfigValue<String> PROXY;
-    public static final ModConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
-    public static final ModConfigSpec SPEC;
+    public static final ForgeConfigSpec.ConfigValue<String> API_KEY;
+    public static final ForgeConfigSpec.ConfigValue<String> BASE_URL;
+    public static final ForgeConfigSpec.ConfigValue<String> MODEL;
+    public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
+    public static final ForgeConfigSpec.ConfigValue<String> PROXY;
+    public static final ForgeConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
+    public static final ForgeConfigSpec SPEC;
 
     static {
-        ModConfigSpec.Builder b = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
         b.comment("OpenAI / OpenAI-compatible API settings.").push("openai");
 
         API_KEY = b.comment("API key (sk-...) sent as the bearer token. Required.")
@@ -72,7 +72,7 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     }
 
     /** Default constructor used by {@code ServiceLoader}. */
-    public NeoForgeNumenConfig() {}
+    public ForgeNumenConfig() {}
 
     @Override
     public String getApiKey() {
@@ -139,17 +139,13 @@ public final class NeoForgeNumenConfig implements INumenConfig {
 
     /**
      * Flush the in-memory config to disk. The setters above only mutate the
-     * loaded NightConfig in memory — {@link ModConfigSpec.ConfigValue#set}'s
-     * own javadoc states it "does NOT write to disk... call
-     * {@link ModConfigSpec#save()} eventually". Without this explicit save an
-     * in-game settings change is lost on shutdown (the values revert to
-     * whatever was last on disk), which is exactly the "reverts to default"
-     * bug players hit after changing provider / key in the GUI.
+     * loaded NightConfig in memory — {@link ForgeConfigSpec.ConfigValue#set}'s
+     * own javadoc states it does NOT write to disk; call
+     * {@link ForgeConfigSpec#save()} eventually. Without this explicit save an
+     * in-game settings change is lost on shutdown.
      *
-     * <p>Guarded by {@link ModConfigSpec#isLoaded()}: {@code save()} throws if
-     * the spec hasn't been bound to a config file yet (e.g. called absurdly
-     * early). In that case the mutations live in the cached values and the
-     * normal NeoForge load/correct cycle will persist them.
+     * <p>Guarded by {@link ForgeConfigSpec#isLoaded()}: {@code save()} throws if
+     * the spec hasn't been bound to a config file yet.
      */
     @Override
     public void save() {
@@ -162,11 +158,11 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     }
 
     /**
-     * Guard against the (rare) corner case where a config value is read
-     * before the spec is fully bound — returns the empty string instead of
-     * letting an exception escape into the LLM call site.
+     * Guard against the (rare) corner case where a config value is read before
+     * the spec is fully bound — returns the empty string instead of letting an
+     * exception escape into the LLM call site.
      */
-    private static String safe(ModConfigSpec.ConfigValue<String> v) {
+    private static String safe(ForgeConfigSpec.ConfigValue<String> v) {
         try {
             String s = v.get();
             return s == null ? "" : s;

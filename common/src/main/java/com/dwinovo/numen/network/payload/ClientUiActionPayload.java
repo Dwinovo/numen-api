@@ -1,36 +1,34 @@
 package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
 /**
  * Server → Client: ask the receiving owner's client to perform a local UI action.
- * The {@code /numen} command tree lives entirely on the server now (so it
- * doesn't collide with the client-side command dispatcher), but a couple of its
- * verbs — opening the settings GUI, clearing the conversation loops — are
- * inherently client-local. The server command just fires this packet at the
- * caller and their client does the rest.
+ * The {@code /numen} command tree lives entirely on the server now, but a couple of its
+ * verbs — opening the settings GUI, clearing the conversation loops — are inherently
+ * client-local. The server command just fires this packet at the caller and their client does the rest.
  */
 public record ClientUiActionPayload(Action action) implements CustomPacketPayload {
 
     public enum Action { OPEN_SETTINGS, RESET_LOOPS }
 
-    public static final Type<ClientUiActionPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "client_ui_action"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, ClientUiActionPayload> STREAM_CODEC =
-            StreamCodec.composite(
-                    ByteBufCodecs.VAR_INT.map(i -> Action.values()[i], a -> a.ordinal()),
-                    ClientUiActionPayload::action,
-                    ClientUiActionPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "client_ui_action");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeEnum(action);
+    }
+
+    public static ClientUiActionPayload read(FriendlyByteBuf buf) {
+        return new ClientUiActionPayload(buf.readEnum(Action.class));
     }
 
     /** Client-side handler. Runs on the client main thread (network layer arranges that). */

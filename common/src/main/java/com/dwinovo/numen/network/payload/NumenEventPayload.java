@@ -2,10 +2,7 @@ package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.agent.AgentLoopRegistry;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
@@ -13,27 +10,28 @@ import java.util.UUID;
 
 /**
  * Server → Client: an asynchronous WORLD EVENT for a companion's brain (dimension change, a hazard,
- * …) — the generic version of Claude Code's "channel notification" (an external event pushed into a
- * running session). The server detects the event (edge-triggered) and ships a ready-made {@code <event>}
- * XML string; the client loop queues it like an owner prompt and splices it in at a protocol-valid
- * boundary. {@code urgent} wakes an idle brain to react now; otherwise it rides along on the next
- * owner-driven turn (no extra LLM call). Death is its own bespoke freeze/thaw pair, not this.
+ * …). The server detects the event (edge-triggered) and ships a ready-made {@code <event>} XML string;
+ * the client loop queues it like an owner prompt and splices it in at a protocol-valid boundary.
+ * {@code urgent} wakes an idle brain to react now; otherwise it rides along on the next owner-driven turn.
  */
 public record NumenEventPayload(UUID entityUuid, String xml, boolean urgent) implements CustomPacketPayload {
 
-    public static final Type<NumenEventPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "numen_event"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, NumenEventPayload> STREAM_CODEC =
-            StreamCodec.composite(
-                    UUIDUtil.STREAM_CODEC, NumenEventPayload::entityUuid,
-                    ByteBufCodecs.STRING_UTF8, NumenEventPayload::xml,
-                    ByteBufCodecs.BOOL, NumenEventPayload::urgent,
-                    NumenEventPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "numen_event");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeUUID(entityUuid);
+        buf.writeUtf(xml);
+        buf.writeBoolean(urgent);
+    }
+
+    public static NumenEventPayload read(FriendlyByteBuf buf) {
+        return new NumenEventPayload(buf.readUUID(), buf.readUtf(), buf.readBoolean());
     }
 
     /** Client-side handler. Runs on the client main thread (network layer arranges that). */

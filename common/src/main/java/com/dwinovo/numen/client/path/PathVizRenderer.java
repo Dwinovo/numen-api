@@ -142,8 +142,9 @@ public final class PathVizRenderer {
         Vector3f n = new Vector3f((float) (x2 - x1), (float) (y2 - y1), (float) (z2 - z1));
         if (n.lengthSquared() > 1.0e-6F) n.normalize();
         else n.set(0.0F, 1.0F, 0.0F);
-        // 1.20.6 VertexConsumer: the old vertex(matrix,…).color(…).normal(…).endVertex() chain.
-        vc.vertex(pose.pose(), (float) x1, (float) y1, (float) z1).color(color).normal(pose, n.x(), n.y(), n.z()).endVertex();
-        vc.vertex(pose.pose(), (float) x2, (float) y2, (float) z2).color(color).normal(pose, n.x(), n.y(), n.z()).endVertex();
+        // 1.20.4 VertexConsumer: the old vertex(matrix,…).color(…).normal(matrix3f,…).endVertex() chain.
+        // normal(...) takes the Pose's normal Matrix3f here (the (Pose,…) overload is 1.20.5+).
+        vc.vertex(pose.pose(), (float) x1, (float) y1, (float) z1).color(color).normal(pose.normal(), n.x(), n.y(), n.z()).endVertex();
+        vc.vertex(pose.pose(), (float) x2, (float) y2, (float) z2).color(color).normal(pose.normal(), n.x(), n.y(), n.z()).endVertex();
     }
 }

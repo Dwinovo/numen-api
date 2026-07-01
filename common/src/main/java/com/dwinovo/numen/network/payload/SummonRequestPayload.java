@@ -2,9 +2,7 @@ package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.entity.Companions;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -19,16 +17,20 @@ public record SummonRequestPayload(String name) implements CustomPacketPayload {
 
     public static final int MAX_NAME = 32;
 
-    public static final Type<SummonRequestPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "summon_request"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, SummonRequestPayload> STREAM_CODEC =
-            StreamCodec.composite(ByteBufCodecs.stringUtf8(MAX_NAME), SummonRequestPayload::name,
-                    SummonRequestPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "summon_request");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeUtf(name, MAX_NAME);
+    }
+
+    public static SummonRequestPayload read(FriendlyByteBuf buf) {
+        return new SummonRequestPayload(buf.readUtf(MAX_NAME));
     }
 
     /** Server main thread. */

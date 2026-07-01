@@ -40,7 +40,7 @@ public final class CompanionFactory {
         NumenPlayer player = new NumenPlayer(server, level, profile, ClientInformation.createDefault());
         FakeConnection connection = new FakeConnection();
         server.getPlayerList().placeNewPlayer(connection, player,
-                CommonListenerCookie.createInitial(profile, false));
+                CommonListenerCookie.createInitial(profile));  // 1.20.4: no 'transferred' boolean yet
         // placeNewPlayer does NOT load a hand-built fake player's .dat, so restore
         // it ourselves (Carpet's model): position, inventory, health, owner from
         // disk. Without this a respawned companion spawns at 0,0,0 with no items.
@@ -70,10 +70,14 @@ public final class CompanionFactory {
      * {@code loadPlayerData}. No-op on first summon (no file yet).
      */
     private static void loadPlayerData(MinecraftServer server, NumenPlayer player) {
-        // 1.21.5: PlayerList.load(player) returns Optional<CompoundTag> (predates the
-        // ValueInput IO refactor); Entity.load(CompoundTag) consumes it directly.
-        server.getPlayerList().load(player)
-                .ifPresent(player::load);
+        // 1.20.4: PlayerList.load(player) returns a nullable CompoundTag (predates both the
+        // Optional wrapper and the ValueInput IO refactor). It already applies the tag to the
+        // player internally and returns it; re-applying via Entity.load(CompoundTag) is a no-op-safe
+        // belt-and-braces restore of position/inventory for a hand-built fake player.
+        net.minecraft.nbt.CompoundTag tag = server.getPlayerList().load(player);
+        if (tag != null) {
+            player.load(tag);
+        }
     }
 
     /** Save the companion's data and remove it from the world (dormancy). */

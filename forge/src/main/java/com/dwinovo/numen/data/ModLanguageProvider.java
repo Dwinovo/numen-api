@@ -2,11 +2,12 @@ package com.dwinovo.numen.data;
 
 import com.dwinovo.numen.Constants;
 import net.minecraft.data.PackOutput;
-import net.neoforged.neoforge.common.data.LanguageProvider;
+import net.minecraftforge.common.data.LanguageProvider;
 
 /**
- * NeoForge-side translation provider. Mirrors {@code FabricModLanguageProvider}
- * — both delegate to the shared {@link ModLanguageData} catalogue.
+ * Forge-side translation provider. One instance per locale; both feed the
+ * shared {@link ModLanguageData} catalogue so the English and Simplified
+ * Chinese JSONs stay in sync key-by-key. Mirrors {@code FabricModLanguageProvider}.
  */
 public final class ModLanguageProvider extends LanguageProvider {
 

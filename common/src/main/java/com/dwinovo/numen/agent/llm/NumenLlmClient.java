@@ -151,10 +151,13 @@ public final class NumenLlmClient {
         // -- 1. Build wire-format messages and tool list via provider.
         List<JsonObject> wire = new ArrayList<>(messages.size());
         for (ConvoState.Msg m : messages) {
-            switch (m) {
-                case ConvoState.Msg.User u -> wire.add(provider.buildUserMessage(u.content()));
-                case ConvoState.Msg.Assistant a -> wire.add(provider.assistantToRequestMessage(a.turn()));
-                case ConvoState.Msg.Tool t -> wire.add(provider.buildToolResultMessage(t.toolCallId(), t.content()));
+            // Java 17: instanceof chain in place of a Java 21 sealed pattern switch.
+            if (m instanceof ConvoState.Msg.User u) {
+                wire.add(provider.buildUserMessage(u.content()));
+            } else if (m instanceof ConvoState.Msg.Assistant a) {
+                wire.add(provider.assistantToRequestMessage(a.turn()));
+            } else if (m instanceof ConvoState.Msg.Tool t) {
+                wire.add(provider.buildToolResultMessage(t.toolCallId(), t.content()));
             }
         }
         JsonArray toolList = provider.buildToolList(tools);

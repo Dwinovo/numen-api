@@ -2,14 +2,12 @@ package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.data.ClientNumenInventory;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,22 +21,53 @@ public record NumenInventoryPayload(UUID uuid, boolean loaded, List<ItemStack> i
                                     List<ItemStack> craft, int foodLevel, float saturation)
         implements CustomPacketPayload {
 
-    public static final Type<NumenInventoryPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "numen_inventory"));
+    /** Cap defends against absurd input. */
+    public static final int MAX_ITEMS = 256;
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, NumenInventoryPayload> STREAM_CODEC =
-            StreamCodec.composite(
-                    UUIDUtil.STREAM_CODEC, NumenInventoryPayload::uuid,
-                    ByteBufCodecs.BOOL, NumenInventoryPayload::loaded,
-                    ItemStack.OPTIONAL_LIST_STREAM_CODEC, NumenInventoryPayload::items,
-                    ItemStack.OPTIONAL_LIST_STREAM_CODEC, NumenInventoryPayload::craft,
-                    ByteBufCodecs.VAR_INT, NumenInventoryPayload::foodLevel,
-                    ByteBufCodecs.FLOAT, NumenInventoryPayload::saturation,
-                    NumenInventoryPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "numen_inventory");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeUUID(uuid);
+        buf.writeBoolean(loaded);
+        writeItems(buf, items);
+        writeItems(buf, craft);
+        buf.writeVarInt(foodLevel);
+        buf.writeFloat(saturation);
+    }
+
+    public static NumenInventoryPayload read(FriendlyByteBuf buf) {
+        UUID uuid = buf.readUUID();
+        boolean loaded = buf.readBoolean();
+        List<ItemStack> items = readItems(buf);
+        List<ItemStack> craft = readItems(buf);
+        int foodLevel = buf.readVarInt();
+        float saturation = buf.readFloat();
+        return new NumenInventoryPayload(uuid, loaded, items, craft, foodLevel, saturation);
+    }
+
+    // FriendlyByteBuf#writeItem / #readItem already encode empty stacks (a leading present-flag),
+    // so this is the 1.20.4 equivalent of ItemStack.OPTIONAL_LIST_STREAM_CODEC.
+    private static void writeItems(FriendlyByteBuf buf, List<ItemStack> list) {
+        int n = Math.min(list.size(), MAX_ITEMS);
+        buf.writeVarInt(n);
+        for (int i = 0; i < n; i++) {
+            buf.writeItem(list.get(i));
+        }
+    }
+
+    private static List<ItemStack> readItems(FriendlyByteBuf buf) {
+        int n = Math.min(buf.readVarInt(), MAX_ITEMS);
+        List<ItemStack> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            list.add(buf.readItem());
+        }
+        return list;
     }
 
     /** Client main thread. */

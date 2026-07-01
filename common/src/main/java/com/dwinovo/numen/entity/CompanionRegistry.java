@@ -3,7 +3,6 @@ package com.dwinovo.numen.entity;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -64,14 +63,15 @@ public final class CompanionRegistry extends SavedData {
             CompanionRegistry::new, CompanionRegistry::load,
             net.minecraft.util.datafix.DataFixTypes.SAVED_DATA_RANDOM_SEQUENCES);
 
+    // 1.20.4 SavedData: save/load take only the CompoundTag (the HolderLookup.Provider param is 1.20.5+).
     @Override
-    public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+    public CompoundTag save(CompoundTag tag) {
         CODEC.encodeStart(NbtOps.INSTANCE, this).result()
                 .ifPresent(t -> { if (t instanceof CompoundTag c) tag.merge(c); });
         return tag;
     }
 
-    private static CompanionRegistry load(CompoundTag tag, HolderLookup.Provider registries) {
+    private static CompanionRegistry load(CompoundTag tag) {
         return CODEC.parse(NbtOps.INSTANCE, tag).result().orElseGet(CompanionRegistry::new);
     }
 

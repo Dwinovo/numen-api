@@ -2,24 +2,18 @@ package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.agent.NumenRoster;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Server → Client: the roster of companions this player owns (UUID + name).
- * The companion body is a fake {@code ServerPlayer}, so the client can't be
- * "enrolled" by right-clicking a Mob any more — the server is the authority on
- * which companions exist. Pushed on owner login (after their dormant companions
- * respawn) and right after a fresh summon, so the client's {@link NumenRoster}
- * panel always reflects the truth without the player having to seek each body
- * out physically.
+ * Pushed on owner login (after their dormant companions respawn) and right after
+ * a fresh summon, so the client's {@link NumenRoster} panel always reflects the truth.
  */
 public record CompanionListPayload(List<Entry> companions) implements CustomPacketPayload {
 
@@ -27,26 +21,33 @@ public record CompanionListPayload(List<Entry> companions) implements CustomPack
     public static final int MAX = 64;
 
     /** One companion's roster line. */
-    public record Entry(UUID uuid, String name) {
-        static final StreamCodec<RegistryFriendlyByteBuf, Entry> CODEC =
-                StreamCodec.composite(
-                        UUIDUtil.STREAM_CODEC, Entry::uuid,
-                        ByteBufCodecs.stringUtf8(256), Entry::name,
-                        Entry::new);
-    }
+    public record Entry(UUID uuid, String name) {}
 
-    public static final Type<CompanionListPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "companion_list"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, CompanionListPayload> STREAM_CODEC =
-            StreamCodec.composite(
-                    Entry.CODEC.apply(ByteBufCodecs.list(MAX)),
-                    CompanionListPayload::companions,
-                    CompanionListPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "companion_list");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        int n = Math.min(companions.size(), MAX);
+        buf.writeVarInt(n);
+        for (int i = 0; i < n; i++) {
+            Entry e = companions.get(i);
+            buf.writeUUID(e.uuid());
+            buf.writeUtf(e.name(), 256);
+        }
+    }
+
+    public static CompanionListPayload read(FriendlyByteBuf buf) {
+        int n = Math.min(buf.readVarInt(), MAX);
+        List<Entry> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            list.add(new Entry(buf.readUUID(), buf.readUtf(256)));
+        }
+        return new CompanionListPayload(list);
     }
 
     /** Client-side handler. Runs on the client main thread (network layer arranges that). */

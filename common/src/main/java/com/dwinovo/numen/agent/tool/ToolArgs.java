@@ -40,7 +40,7 @@ public final class ToolArgs {
 
     /** A required integer, clamped into {@code [min, max]}. */
     public static int requireInt(JsonObject args, String key, int min, int max) {
-        return Math.clamp(requireInt(args, key), min, max);
+        return Math.max(min, Math.min(max, requireInt(args, key)));
     }
 
     /** A nullable integer arg: {@code null} when absent or JSON null. */
@@ -77,7 +77,7 @@ public final class ToolArgs {
 
     /** A required numeric arg, clamped into {@code [min, max]}. */
     public static double requireDouble(JsonObject args, String key, double min, double max) {
-        return Math.clamp(requireDouble(args, key), min, max);
+        return Math.max(min, Math.min(max, requireDouble(args, key)));
     }
 
     /** A nullable numeric arg: {@code null} when absent or JSON null. */

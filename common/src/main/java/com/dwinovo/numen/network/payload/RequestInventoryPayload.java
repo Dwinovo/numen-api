@@ -3,9 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.entity.NumenPlayer;
 import com.dwinovo.numen.platform.Services;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -29,16 +27,20 @@ public record RequestInventoryPayload(UUID uuid) implements CustomPacketPayload 
     /** The 36 main backpack slots (hotbar + storage); equipment is already client-synced. */
     public static final int MAIN_SLOTS = 36;
 
-    public static final Type<RequestInventoryPayload> TYPE = new Type<>(
-            new ResourceLocation(Constants.MOD_ID, "request_inventory"));
-
-    public static final StreamCodec<RegistryFriendlyByteBuf, RequestInventoryPayload> STREAM_CODEC =
-            StreamCodec.composite(UUIDUtil.STREAM_CODEC, RequestInventoryPayload::uuid,
-                    RequestInventoryPayload::new);
+    public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "request_inventory");
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
+    public ResourceLocation id() {
+        return ID;
+    }
+
+    @Override
+    public void write(FriendlyByteBuf buf) {
+        buf.writeUUID(uuid);
+    }
+
+    public static RequestInventoryPayload read(FriendlyByteBuf buf) {
+        return new RequestInventoryPayload(buf.readUUID());
     }
 
     /** Server main thread. */

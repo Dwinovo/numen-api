@@ -6,11 +6,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.energy.IEnergyStorage;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.items.IItemHandler;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.energy.IEnergyStorage;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.capability.IFluidHandler;
+import net.minecraftforge.items.IItemHandler;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -18,38 +20,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * NeoForge implementation of {@link IBlockCapabilityReader} — reads a block's
- * item/fluid/energy contents through the standard block capabilities.
+ * Forge (1.20.4) implementation of {@link IBlockCapabilityReader} — reads a
+ * block's item/fluid/energy contents through the classic Forge capability
+ * system.
  *
- * <h2>Why query null AND every face</h2>
- * The {@code null} context means "no particular side"; many machines expose a
- * combined handler there, but several (Industrial Foregoing, Mekanism disabled
- * faces, Thermal side-config) return {@code null} for {@code null} and ONLY
- * expose per-face handlers. There is no documented contract that null-side is a
- * combined view, so we probe {@code null} + all six {@link Direction}s and
- * de-duplicate the returned handlers by identity, recording which sides exposed
- * each one.
+ * <h2>Forge vs NeoForge capability access</h2>
+ * NeoForge's reworked system queries the level directly
+ * ({@code level.getCapability(BlockCapability, pos, side)}); the classic Forge
+ * system instead hangs capabilities off the {@link BlockEntity} and returns a
+ * {@code LazyOptional}. So we fetch the block entity first and probe
+ * {@code be.getCapability(cap, side)} for {@code null} + all six faces, since
+ * many machines only expose per-face handlers. The handler interfaces
+ * themselves ({@link IItemHandler}/{@link IFluidHandler}/{@link IEnergyStorage})
+ * are identical in shape to the classic NeoForge ones, so the output format
+ * matches the other loaders'.
  */
-public final class NeoForgeBlockCapabilityReader implements IBlockCapabilityReader {
+public final class ForgeBlockCapabilityReader implements IBlockCapabilityReader {
 
     /** Cap on listed non-empty item slots per handler, so a huge modded inventory can't blow up the reply. */
     private static final int MAX_SLOT_LINES = 64;
 
     @Override
     public String describe(Level level, BlockPos pos) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) return null; // Forge capabilities live on the block entity
         StringBuilder sb = new StringBuilder();
-        appendItems(level, pos, sb);
-        appendFluids(level, pos, sb);
-        appendEnergy(level, pos, sb);
+        appendItems(be, sb);
+        appendFluids(be, sb);
+        appendEnergy(be, sb);
         return sb.length() == 0 ? null : sb.toString();
     }
 
-    private void appendItems(Level level, BlockPos pos, StringBuilder sb) {
-        Map<IItemHandler, List<String>> byHandler = new IdentityHashMap<>();
-        collect(byHandler, level.getCapability(Capabilities.ItemHandler.BLOCK, pos, null), "all");
-        for (Direction d : Direction.values()) {
-            collect(byHandler, level.getCapability(Capabilities.ItemHandler.BLOCK, pos, d), d.getName());
-        }
+    private void appendItems(BlockEntity be, StringBuilder sb) {
+        Map<IItemHandler, List<String>> byHandler = sided(be, ForgeCapabilities.ITEM_HANDLER);
         if (byHandler.isEmpty()) return;
         int idx = 0;
         for (Map.Entry<IItemHandler, List<String>> e : byHandler.entrySet()) {
@@ -76,12 +79,8 @@ public final class NeoForgeBlockCapabilityReader implements IBlockCapabilityRead
         }
     }
 
-    private void appendFluids(Level level, BlockPos pos, StringBuilder sb) {
-        Map<IFluidHandler, List<String>> byHandler = new IdentityHashMap<>();
-        collect(byHandler, level.getCapability(Capabilities.FluidHandler.BLOCK, pos, null), "all");
-        for (Direction d : Direction.values()) {
-            collect(byHandler, level.getCapability(Capabilities.FluidHandler.BLOCK, pos, d), d.getName());
-        }
+    private void appendFluids(BlockEntity be, StringBuilder sb) {
+        Map<IFluidHandler, List<String>> byHandler = sided(be, ForgeCapabilities.FLUID_HANDLER);
         if (byHandler.isEmpty()) return;
         int idx = 0;
         for (Map.Entry<IFluidHandler, List<String>> e : byHandler.entrySet()) {
@@ -102,11 +101,11 @@ public final class NeoForgeBlockCapabilityReader implements IBlockCapabilityRead
         }
     }
 
-    private void appendEnergy(Level level, BlockPos pos, StringBuilder sb) {
-        IEnergyStorage en = level.getCapability(Capabilities.EnergyStorage.BLOCK, pos, null);
+    private void appendEnergy(BlockEntity be, StringBuilder sb) {
+        IEnergyStorage en = be.getCapability(ForgeCapabilities.ENERGY, null).orElse(null);
         if (en == null) {
             for (Direction d : Direction.values()) {
-                en = level.getCapability(Capabilities.EnergyStorage.BLOCK, pos, d);
+                en = be.getCapability(ForgeCapabilities.ENERGY, d).orElse(null);
                 if (en != null) break;
             }
         }
@@ -120,7 +119,19 @@ public final class NeoForgeBlockCapabilityReader implements IBlockCapabilityRead
         sb.append("\n");
     }
 
-    /** Record a non-null handler under the side that exposed it, de-duplicating by identity. */
+    /**
+     * Probe a capability on the {@code null} context plus all six faces, mapping
+     * each distinct handler (by identity) to the sides that exposed it.
+     */
+    private static <T> Map<T, List<String>> sided(BlockEntity be, Capability<T> cap) {
+        Map<T, List<String>> byHandler = new IdentityHashMap<>();
+        collect(byHandler, be.getCapability(cap, null).orElse(null), "all");
+        for (Direction d : Direction.values()) {
+            collect(byHandler, be.getCapability(cap, d).orElse(null), d.getName());
+        }
+        return byHandler;
+    }
+
     private static <T> void collect(Map<T, List<String>> byHandler, T handler, String side) {
         if (handler == null) return;
         byHandler.computeIfAbsent(handler, h -> new ArrayList<>()).add(side);
