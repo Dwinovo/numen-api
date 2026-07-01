@@ -24,7 +24,7 @@ public record NumenInventoryPayload(UUID uuid, boolean loaded, List<ItemStack> i
         implements CustomPacketPayload {
 
     public static final Type<NumenInventoryPayload> TYPE = new Type<>(
-            ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "numen_inventory"));
+            new ResourceLocation(Constants.MOD_ID, "numen_inventory"));
 
     public static final StreamCodec<RegistryFriendlyByteBuf, NumenInventoryPayload> STREAM_CODEC =
             StreamCodec.composite(

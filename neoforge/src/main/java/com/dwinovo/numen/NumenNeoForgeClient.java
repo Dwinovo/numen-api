@@ -64,7 +64,7 @@ public class NumenNeoForgeClient {
     static void registerGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {
         // HUD: advancement-style activity toasts (top-right) when not watching a panel.
         event.registerAboveAll(
-                ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "numen_toasts"),
+                new ResourceLocation(Constants.MOD_ID, "numen_toasts"),
                 (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
     }
 

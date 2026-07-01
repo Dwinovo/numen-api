@@ -33,7 +33,7 @@ public record NumenDeathPayload(UUID entityUuid, String cause, long respawnDelay
         implements CustomPacketPayload {
 
     public static final Type<NumenDeathPayload> TYPE = new Type<>(
-            ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "numen_death"));
+            new ResourceLocation(Constants.MOD_ID, "numen_death"));
 
     public static final StreamCodec<RegistryFriendlyByteBuf, NumenDeathPayload> STREAM_CODEC =
             StreamCodec.composite(
