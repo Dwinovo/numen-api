@@ -3,7 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.entity.Companions;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -13,7 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
  * "+" button. Mirrors the {@code /numen player summon} command — summon is
  * idempotent per (owner, name), so re-summoning an existing name just wakes it.
  */
-public record SummonRequestPayload(String name) implements CustomPacketPayload {
+public record SummonRequestPayload(String name) implements NumenPayload {
 
     public static final int MAX_NAME = 32;
 

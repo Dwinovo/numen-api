@@ -5,7 +5,7 @@ import com.dwinovo.numen.entity.NumenPlayer;
 import com.dwinovo.numen.entity.CompanionRegistry;
 import com.dwinovo.numen.platform.Services;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -20,7 +20,7 @@ import java.util.UUID;
  * <p>Answered with one {@link NumenLocationsPayload} carrying a snapshot per
  * requested UUID. Ownership is enforced per entity.
  */
-public record LocateNumenPayload(List<UUID> entityUuids) implements CustomPacketPayload {
+public record LocateNumenPayload(List<UUID> entityUuids) implements NumenPayload {
 
     /** Roster panels are small; cap defends against garbage input. */
     public static final int MAX_UUIDS = 16;

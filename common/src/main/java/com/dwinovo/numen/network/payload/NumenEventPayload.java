@@ -3,7 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.agent.AgentLoopRegistry;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.UUID;
@@ -14,7 +14,7 @@ import java.util.UUID;
  * the client loop queues it like an owner prompt and splices it in at a protocol-valid boundary.
  * {@code urgent} wakes an idle brain to react now; otherwise it rides along on the next owner-driven turn.
  */
-public record NumenEventPayload(UUID entityUuid, String xml, boolean urgent) implements CustomPacketPayload {
+public record NumenEventPayload(UUID entityUuid, String xml, boolean urgent) implements NumenPayload {
 
     public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "numen_event");
 

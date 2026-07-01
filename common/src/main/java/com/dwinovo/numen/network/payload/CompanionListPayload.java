@@ -3,7 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.agent.NumenRoster;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
@@ -15,7 +15,7 @@ import java.util.UUID;
  * Pushed on owner login (after their dormant companions respawn) and right after
  * a fresh summon, so the client's {@link NumenRoster} panel always reflects the truth.
  */
-public record CompanionListPayload(List<Entry> companions) implements CustomPacketPayload {
+public record CompanionListPayload(List<Entry> companions) implements NumenPayload {
 
     /** Cap defends against absurd input; nobody owns hundreds of companions. */
     public static final int MAX = 64;

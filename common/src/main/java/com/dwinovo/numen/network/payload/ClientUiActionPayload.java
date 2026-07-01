@@ -2,7 +2,7 @@ package com.dwinovo.numen.network.payload;
 
 import com.dwinovo.numen.Constants;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -11,7 +11,7 @@ import net.minecraft.resources.ResourceLocation;
  * verbs — opening the settings GUI, clearing the conversation loops — are inherently
  * client-local. The server command just fires this packet at the caller and their client does the rest.
  */
-public record ClientUiActionPayload(Action action) implements CustomPacketPayload {
+public record ClientUiActionPayload(Action action) implements NumenPayload {
 
     public enum Action { OPEN_SETTINGS, RESET_LOOPS }
 

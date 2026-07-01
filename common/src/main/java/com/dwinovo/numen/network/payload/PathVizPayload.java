@@ -4,7 +4,7 @@ import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.path.ClientPathViz;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
@@ -29,7 +29,7 @@ public record PathVizPayload(UUID companion,
                              List<BlockPos> nodes,
                              List<BlockPos> toBreak,
                              List<BlockPos> toPlace,
-                             List<BlockPos> targets) implements CustomPacketPayload {
+                             List<BlockPos> targets) implements NumenPayload {
 
     /** Cap per list — paths are trimmed well below this; defends against absurd input. */
     public static final int MAX = 512;

@@ -22,7 +22,7 @@ import net.minecraftforge.fml.loading.FMLEnvironment;
  * world lifecycle events go on {@link MinecraftForge#EVENT_BUS}.
  *
  * <p>Networking is registered eagerly via {@code NumenNetwork.register()} — the
- * Forge {@link net.minecraftforge.network.SimpleChannel} accepts message
+ * Forge {@code SimpleChannel} accepts message
  * registration during construction, so there is no deferred
  * "flush on RegisterPayloadHandlersEvent" dance like NeoForge required.
  */

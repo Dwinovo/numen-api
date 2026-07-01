@@ -3,7 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.agent.AgentLoopRegistry;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.UUID;
@@ -18,7 +18,7 @@ import java.util.UUID;
  * is SUSPENDED, not disposed. {@code cause} is the vanilla death message for that tool result.
  */
 public record NumenDeathPayload(UUID entityUuid, String cause, long respawnDelayMs)
-        implements CustomPacketPayload {
+        implements NumenPayload {
 
     public static final ResourceLocation ID = new ResourceLocation(Constants.MOD_ID, "numen_death");
 

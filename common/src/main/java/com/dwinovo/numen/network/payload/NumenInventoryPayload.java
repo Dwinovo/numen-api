@@ -3,7 +3,7 @@ package com.dwinovo.numen.network.payload;
 import com.dwinovo.numen.Constants;
 import com.dwinovo.numen.client.data.ClientNumenInventory;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -19,7 +19,7 @@ import java.util.UUID;
  */
 public record NumenInventoryPayload(UUID uuid, boolean loaded, List<ItemStack> items,
                                     List<ItemStack> craft, int foodLevel, float saturation)
-        implements CustomPacketPayload {
+        implements NumenPayload {
 
     /** Cap defends against absurd input. */
     public static final int MAX_ITEMS = 256;
