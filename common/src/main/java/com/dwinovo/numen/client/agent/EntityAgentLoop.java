@@ -770,18 +770,22 @@ public final class EntityAgentLoop {
     private static int estimateContextTokens(List<ConvoState.Msg> history) {
         long cjk = 0, ascii = 0;
         for (ConvoState.Msg msg : history) {
-            String text = switch (msg) {
-                case ConvoState.Msg.User u -> u.content();
-                case ConvoState.Msg.Tool t -> t.content();
-                case ConvoState.Msg.Assistant a -> {
-                    StringBuilder sb = new StringBuilder(
-                            a.turn().content() == null ? "" : a.turn().content());
-                    for (LlmToolCall tc : a.turn().toolCalls()) {
-                        sb.append(tc.name()).append(tc.arguments());
-                    }
-                    yield sb.toString();
+            // Java 17: instanceof chain in place of a Java 21 sealed pattern switch.
+            String text;
+            if (msg instanceof ConvoState.Msg.User u) {
+                text = u.content();
+            } else if (msg instanceof ConvoState.Msg.Tool t) {
+                text = t.content();
+            } else if (msg instanceof ConvoState.Msg.Assistant a) {
+                StringBuilder sb = new StringBuilder(
+                        a.turn().content() == null ? "" : a.turn().content());
+                for (LlmToolCall tc : a.turn().toolCalls()) {
+                    sb.append(tc.name()).append(tc.arguments());
                 }
-            };
+                text = sb.toString();
+            } else {
+                text = null;
+            }
             if (text == null) continue;
             for (int i = 0; i < text.length(); i++) {
                 if (text.charAt(i) > 0x2E7F) cjk++; else ascii++;
