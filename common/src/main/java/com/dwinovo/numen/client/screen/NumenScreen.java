@@ -232,6 +232,7 @@ public final class NumenScreen extends Screen {
         input = null;
         sendButton = stopButton = compactButton = null;
         apiKeyInput = modelInput = baseUrlInput = proxyInput = siteNameInput = null;
+        providerDropdown = null;
         modelDropdown = null;
         summonInput = null;
         if (summoning) { buildSummonField(); return; }
@@ -428,7 +429,7 @@ public final class NumenScreen extends Screen {
     /** Model row: a preset dropdown for the provider's known models, or a free-text box (custom mode)
      *  with a "▾" toggle back to presets. A custom provider (openai-compatible) is always free-text. */
     private void buildModelRow(int x, int y, int w) {
-        ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(providerDropdown.selectedId()));
+        ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(selectedProviderId()));
         boolean providerCustom = mp != null && mp.custom();
         if (customModel || providerCustom) {
             customModel = true;
@@ -473,6 +474,11 @@ public final class NumenScreen extends Screen {
         return e;
     }
 
+    /** The working provider remains available while modal rebuilds intentionally omit settings widgets. */
+    private String selectedProviderId() {
+        return providerDropdown == null ? LlmProviders.normalize(wProvider) : providerDropdown.selectedId();
+    }
+
     private void onSaveSettings() {
         INumenConfig cfg = Services.CONFIG;
         if (addingSite) {                          // create a new user site, then select it
@@ -495,7 +501,7 @@ public final class NumenScreen extends Screen {
             savedFlashUntil = System.currentTimeMillis() + 1500;
             return;
         }
-        cfg.setProvider(providerDropdown.selectedId());
+        cfg.setProvider(selectedProviderId());
         cfg.setApiKey(apiKeyInput.getValue());
         String model = customModel
                 ? (modelInput != null ? modelInput.getValue().trim() : "")
@@ -636,7 +642,7 @@ public final class NumenScreen extends Screen {
             }
             if (tab == Tab.SETTINGS && modelDropdown != null
                     && modelDropdown.mouseClicked(mouseX, mouseY)) {
-                providerDropdown.close();
+                if (providerDropdown != null) providerDropdown.close();
                 if (CUSTOM_MODEL.equals(modelDropdown.selectedId())) {       // "自定义…" → free-text box
                     preserveKeyUrl();
                     customModel = true;
@@ -748,21 +754,22 @@ public final class NumenScreen extends Screen {
             w.render(g, mouseX, mouseY, partial);
         }
         // Base URL / Proxy placeholders, drawn shadowless by us (the EditBox hint renders with a shadow).
-        if (tab == Tab.SETTINGS) {
+        boolean settingsWidgetsVisible = tab == Tab.SETTINGS && !summoning && dismissPending == null;
+        if (settingsWidgetsVisible) {
             String urlPh = addingSite ? "https://… (OpenAI-compatible)"
-                    : LlmProviders.byId(providerDropdown.selectedId()).defaultBaseUrl();
+                    : LlmProviders.byId(selectedProviderId()).defaultBaseUrl();
             placeholder(g, baseUrlInput, urlPh);
             placeholder(g, proxyInput, "host:port (optional)");
             // Model + site-name placeholders, also shadowless (these EditBoxes are null outside
             // custom-model / add-site mode, and placeholder() no-ops on null/non-empty/focused).
             placeholder(g, modelInput, addingSite ? "model id"
-                    : LlmProviders.byId(providerDropdown.selectedId()).defaultModel());
+                    : LlmProviders.byId(selectedProviderId()).defaultModel());
             if (addingSite) placeholder(g, siteNameInput, "e.g. My Proxy");
         }
         // (Chat-input placeholder is the FlatEditBox hint now — drawn shadowless and under the
         // caret in the widget pass, so it can't paint over the caret like a screen-side draw did.)
         // The provider dropdown's open list must sit above even the fields.
-        if (tab == Tab.SETTINGS) {
+        if (settingsWidgetsVisible) {
             // render the non-open one first so the open list draws on top
             if (modelDropdown != null && providerDropdown != null && providerDropdown.isOpen()) {
                 modelDropdown.render(g, font, mouseX, mouseY);
