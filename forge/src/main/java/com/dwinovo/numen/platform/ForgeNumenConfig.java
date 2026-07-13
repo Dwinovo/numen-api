@@ -26,6 +26,7 @@ public final class ForgeNumenConfig implements INumenConfig {
     public static final ForgeConfigSpec.ConfigValue<String> MODEL;
     public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
     public static final ForgeConfigSpec.ConfigValue<String> PROXY;
+    public static final ForgeConfigSpec.ConfigValue<String> REASONING_EFFORT;
     public static final ForgeConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
     public static final ForgeConfigSpec SPEC;
 
@@ -54,6 +55,11 @@ public final class ForgeNumenConfig implements INumenConfig {
                 .define("provider", "openai");
         PROXY = b.comment("Optional HTTP proxy for LLM calls as host:port (empty = direct).")
                 .define("proxy", "");
+        REASONING_EFFORT = b.comment(
+                "Reasoning / deep-thinking effort for reasoning-capable models.",
+                "auto (default; send nothing, let the backend decide) | low | medium | high.",
+                "When not 'auto', the OpenAI-dialect 'reasoning_effort' request parameter is sent.")
+                .define("reasoning_effort", "auto");
 
         b.pop();
         b.comment("Behaviour tuning.").push("agent");
@@ -105,6 +111,12 @@ public final class ForgeNumenConfig implements INumenConfig {
         return safe(PROXY);
     }
 
+    @Override
+    public String getReasoningEffort() {
+        String s = safe(REASONING_EFFORT);
+        return s.isEmpty() ? "auto" : s;
+    }
+
     // ---- mutations ----
 
     @Override
@@ -130,6 +142,11 @@ public final class ForgeNumenConfig implements INumenConfig {
     @Override
     public void setProxy(String value) {
         PROXY.set(value == null ? "" : value);
+    }
+
+    @Override
+    public void setReasoningEffort(String value) {
+        REASONING_EFFORT.set(value == null ? "auto" : value);
     }
 
     @Override

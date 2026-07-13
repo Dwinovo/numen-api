@@ -85,6 +85,11 @@ public final class NumenForgeClient {
                 .resolve("config").resolve(Constants.MOD_ID);
         Path skillsDir = numenConfigRoot.resolve("skills");
 
+        // MCP client: connect to any external MCP servers listed in
+        // config/numen/mcp_clients.json and register their tools so the built-in
+        // brain can call them.
+        com.dwinovo.numen.mcp.client.McpClientManager.initClient(numenConfigRoot);
+
         event.registerReloadListener((ResourceManagerReloadListener) rm -> {
             SkillRegistry.instance().scan(skillsDir);
         });

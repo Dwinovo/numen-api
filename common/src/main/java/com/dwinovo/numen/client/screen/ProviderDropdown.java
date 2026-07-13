@@ -2,6 +2,7 @@ package com.dwinovo.numen.client.screen;
 
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
@@ -42,19 +43,19 @@ public final class ProviderDropdown {
 
     private String label(int i) {
         if (i < options.size()) return options.get(i).displayName();
-        return "+ 添加站点";
+        return I18n.get("numen.settings.add_site");
     }
     private String idAt(int i) { return i < options.size() ? options.get(i).id() : ADD_SITE; }
 
     private String selectedLabel() {
-        if (ADD_SITE.equals(selectedId)) return "+ 添加站点";
+        if (ADD_SITE.equals(selectedId)) return I18n.get("numen.settings.add_site");
         for (LlmProviders.Option o : options) if (o.id().equals(selectedId)) return o.displayName();
         return options.isEmpty() ? selectedId : options.get(0).displayName();
     }
 
     public void render(GuiGraphics g, Font font, int mouseX, int mouseY) {
         UiTheme th = UiTheme.current();
-        GuiCompat.blitSprite(g,FRAME, x, y, w, h);
+        GuiCompat.blitSprite(g, FRAME, x, y, w, h);
         int ty = y + (h - 8) / 2;
         Nb.text(g, font, selectedLabel(), x + 6, ty, th.text());
         Nb.text(g, font, open ? "▴" : "▾", x + w - 12, ty, th.textDim());
@@ -62,7 +63,7 @@ public final class ProviderDropdown {
         if (open) {
             int oy = y + h - 2;
             int n = rowCount();
-            GuiCompat.blitSprite(g,FRAME, x, oy, w, n * ROW + 4);
+            GuiCompat.blitSprite(g, FRAME, x, oy, w, n * ROW + 4);
             for (int i = 0; i < n; i++) {
                 int ry = oy + 2 + i * ROW;
                 if (mouseX >= x && mouseX < x + w && mouseY >= ry && mouseY < ry + ROW) {

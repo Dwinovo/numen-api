@@ -13,12 +13,14 @@ import com.dwinovo.numen.client.agent.EntityAgentLoop;
 import com.dwinovo.numen.client.agent.NumenRoster;
 import com.dwinovo.numen.client.data.ClientNumenInventory;
 import com.dwinovo.numen.network.payload.RequestInventoryPayload;
+import com.dwinovo.numen.persona.PersonaLibrary;
 import com.dwinovo.numen.platform.Services;
 import com.dwinovo.numen.platform.services.INumenConfig;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -84,6 +86,8 @@ public final class NumenScreen extends Screen {
     private static final int TXT_MUTED = TH.textDim();
     private static final int TXT_FAINT = 0xFF8C7C62;
     private static final int ON_BAND = TH.onBand();
+    /** Faint on-band text (persona name after the companion name): cream blended toward the green band. */
+    private static final int ON_BAND_FAINT = 0xFFB2BF9F;
     private static final int CTA = TH.cta();
     private static final int ON_CTA = TH.onCta();
     private static final int FIELD = TH.field();
@@ -117,6 +121,31 @@ public final class NumenScreen extends Screen {
     private String name;
     private Tab tab = Tab.CHAT;
 
+    /** The Settings tab is a config hub: a left sub-nav picks one of these sections. */
+    private enum SettingsSection { LLM, MCP, SKILLS, PERSONA }
+    private SettingsSection settingsSection = SettingsSection.LLM;
+
+    // Persona library form state (mirrors the MCP add/edit/delete flow).
+    private boolean addingPersona;
+    private String personaEditId;          // non-null = editing this persona; null = creating
+    private String personaDeletePending;   // id awaiting delete confirm
+    private String wPersonaName = "", wPersonaText = "";
+    private net.minecraft.client.gui.components.EditBox personaNameInput;
+    private net.minecraft.client.gui.components.MultiLineEditBox personaTextArea;   // roomy multi-line persona editor
+    /** Persona chosen for the companion currently being summoned (null = default / none). */
+    private String summonPersonaId;
+    private Dropdown summonPersonaDropdown;
+    private static final String PERSONA_DEFAULT = "__default__";
+    private int settingsScroll;   // first visible row of the MCP / skill list (wheel-scroll when long)
+
+    // MCP "add server" form (mirrors the LLM add-site flow)
+    private boolean addingMcp;
+    private boolean mcpStdio;                 // form type: false = http, true = stdio
+    private String wMcpName = "", wMcpTarget = "", wMcpHeader = "";
+    private EditBox mcpNameInput, mcpTargetInput, mcpHeaderInput;
+    private String mcpDeletePending;          // non-null = showing the delete-confirm bar for this server
+    private String mcpEditOriginal;           // non-null = the add-form is EDITING this server (replace on save)
+
     private EditBox input;
     private SimpleButton sendButton;
     private SimpleButton stopButton;
@@ -136,6 +165,7 @@ public final class NumenScreen extends Screen {
     // unsaved working state — settings widgets are (re)built from these, NOT from config, so a rebuild
     // (provider change / custom toggle) doesn't revert what you just picked or typed.
     private String wProvider = "", wApiKey = "", wModel = "", wBaseUrl = "", wProxy = "", wSiteName = "";
+    private String wReasoning = "auto";      // reasoning/thinking effort: auto | low | medium | high
     private boolean addingSite;              // "+ 添加站点" mode: name + base URL + model → writes a site
     private EditBox proxyInput;
     private EditBox siteNameInput;
@@ -144,6 +174,11 @@ public final class NumenScreen extends Screen {
     private EditBox baseUrlInput;
     private long savedFlashUntil;
     private long warnUntil;        // transient "no API key" hint on the chat tab
+
+    // A hovered-row tooltip (MCP / skill list) collected during section render, drawn last so
+    // it sits above every later draw. Cleared each frame.
+    private List<Component> pendingTip;
+    private int pendingTipX, pendingTipY;
 
     // Widgets are registered for EVENTS only (addWidget) and rendered MANUALLY at the end of the
     // frame, so they sit ON TOP of the panel background instead of being painted over by it (the
@@ -212,8 +247,13 @@ public final class NumenScreen extends Screen {
         rebuild();
     }
 
+    private static String[] tabLabels() {
+        return new String[]{
+                I18n.get("numen.tab.chat"), I18n.get("numen.tab.status"), I18n.get("numen.tab.settings")};
+    }
+
     private void layoutTabs() {
-        String[] labels = {"Chat", "Items", "Settings"};
+        String[] labels = tabLabels();
         int x = left + PANEL_W - PAD;
         for (int i = labels.length - 1; i >= 0; i--) {
             int w = font.width(labels[i]) + 10;
@@ -232,8 +272,12 @@ public final class NumenScreen extends Screen {
         input = null;
         sendButton = stopButton = compactButton = null;
         apiKeyInput = modelInput = baseUrlInput = proxyInput = siteNameInput = null;
+        mcpNameInput = mcpTargetInput = mcpHeaderInput = null;
+        personaNameInput = null;
+        personaTextArea = null;
         modelDropdown = null;
         summonInput = null;
+        summonPersonaDropdown = null;
         if (summoning) { buildSummonField(); return; }
         if (dismissPending != null) { buildDismissConfirm(); return; }
         switch (tab) {
@@ -250,8 +294,17 @@ public final class NumenScreen extends Screen {
         summonInput.setMaxLength(com.dwinovo.numen.network.payload.SummonRequestPayload.MAX_NAME);
         summonInput.setBordered(false);
         summonInput.setTextColor(TXT);
-        summonInput.setHint(Component.literal("New companion name…"));
+        summonInput.setHint(Component.translatable("numen.summon.name_hint"));
         add(summonInput);
+        // Optional persona for the new companion — a dropdown of the library (+ 默认). Rendered/routed
+        // manually (see render / mouseClicked), like the Settings model dropdown.
+        List<Dropdown.Item> items = new ArrayList<>();
+        items.add(new Dropdown.Item(PERSONA_DEFAULT, I18n.get("numen.persona.default")));
+        for (PersonaLibrary.Persona p : PersonaLibrary.instance().list()) {
+            items.add(new Dropdown.Item(p.id(), p.name()));
+        }
+        summonPersonaDropdown = new Dropdown(items, summonPersonaId == null ? PERSONA_DEFAULT : summonPersonaId);
+        summonPersonaDropdown.setBounds(left + PAD, y + 26, PANEL_W - PAD * 2, 18);
         setInitialFocus(summonInput);
     }
 
@@ -261,9 +314,9 @@ public final class NumenScreen extends Screen {
         int bw = 64, gap = 8, totalW = bw * 2 + gap;
         int bx = left + (PANEL_W - totalW) / 2;
         int by = top + HEADER_H + 52;
-        add(new SimpleButton(bx, by, bw, 18, Component.literal("取消"),
+        add(new SimpleButton(bx, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
                 b -> { dismissPending = null; rebuild(); }));
-        add(new SimpleButton(bx + bw + gap, by, bw, 18, Component.literal("删除"), b -> {
+        add(new SimpleButton(bx + bw + gap, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
             Services.NETWORK.sendToServer(
                     new com.dwinovo.numen.network.payload.DismissRequestPayload(target));
             dismissPending = null;
@@ -339,13 +392,13 @@ public final class NumenScreen extends Screen {
         // FlatEditBox draws the hint shadowless and UNDER the caret (same widget pass), so use it
         // directly — no separate screen-side placeholder that would paint over the blinking caret.
         // Faint colour is baked into the Component's Style.
-        input.setHint(Nb.colored("Talk to " + (name == null ? "" : name) + "…", TXT_FAINT));
+        input.setHint(Nb.colored(I18n.get("numen.chat.hint", name == null ? "" : name), TXT_FAINT));
         if (!savedInput.isEmpty()) { input.setValue(savedInput); savedInput = ""; }
         add(input);
         setInitialFocus(input);
 
         sendButton = add(new SimpleButton(inX + inW + 4, inputY, sendW, INPUT_H,
-                Component.literal("Send"), b -> onSend()));
+                Component.translatable("numen.chat.send"), b -> onSend()));
 
         stopButton = add(new SimpleButton(inX + inW + 4 + sendW + 4, inputY, stopW, INPUT_H,
                 Component.literal("■"), b -> loop().abort()));
@@ -371,6 +424,7 @@ public final class NumenScreen extends Screen {
         wModel = cfg.getModel() == null ? "" : cfg.getModel();
         wBaseUrl = cfg.getBaseUrl() == null ? "" : cfg.getBaseUrl();
         wProxy = cfg.getProxy() == null ? "" : cfg.getProxy();
+        wReasoning = normalizeReasoning(cfg.getReasoningEffort());
         addingSite = false;
         ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(wProvider));
         boolean known = mp != null && mp.models().stream().anyMatch(m -> m.id().equals(wModel));
@@ -384,15 +438,259 @@ public final class NumenScreen extends Screen {
         if (proxyInput != null) wProxy = proxyInput.getValue();
     }
 
-    // ---- settings tab ----
+    // ---- settings tab (config hub: sub-nav + section) ----
 
-    private static final int SET_SP = 33;     // settings row pitch (5 rows + Save must fit)
+    private static final int SET_SP = 33;     // LLM-section row pitch (5 rows + Save must fit)
+    private static final int NAV_W = 74;      // left sub-nav column width
+    private static final int NAV_SP = 20;     // sub-nav row pitch
+    private static final int LIST_ROW = 22;   // MCP / skill list row height
 
+    /** Left x of the section content area (right of the sub-nav column + divider). */
+    private int secX() { return left + PAD + NAV_W + 8; }
+    /** Width of the section content area. */
+    private int secW() { return PANEL_W - PAD - NAV_W - 8 - PAD; }
+    /** Top y of section content (below the header). */
+    private int secY0() { return top + HEADER_H + 8; }
+    /** Bottom y a list row may reach. */
+    private int secBottom() { return top + PANEL_H - PAD; }
+
+    private void selectSection(SettingsSection s) {
+        if (s == settingsSection) return;
+        settingsSection = s;
+        settingsScroll = 0;
+        addingMcp = false;
+        mcpDeletePending = null;
+        mcpEditOriginal = null;
+        addingPersona = false;
+        personaEditId = null;
+        personaDeletePending = null;
+        rebuild();
+    }
+
+    /** Dispatch widget building by the active section (skill/MCP lists render manually). */
     private void buildSettingsWidgets() {
-        int x = left + PAD, w = PANEL_W - PAD * 2;
-        int y0 = top + HEADER_H + 8;
+        switch (settingsSection) {
+            case LLM -> buildLlmWidgets();
+            case SKILLS -> buildSkillsWidgets();
+            case MCP -> {
+                if (mcpDeletePending != null) buildMcpDeleteConfirm();
+                else if (addingMcp) buildMcpForm();
+                else buildMcpListWidgets();
+            }
+            case PERSONA -> {
+                if (personaDeletePending != null) buildPersonaDeleteConfirm();
+                else if (addingPersona) buildPersonaForm();
+                else buildPersonaListWidgets();
+            }
+        }
+    }
+
+    // ---- Persona section: a library of reusable personas; apply one to the active companion ----
+
+    private void buildPersonaListWidgets() {
+        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable("numen.persona.add"), b -> {
+                    addingPersona = true; personaEditId = null;
+                    wPersonaName = ""; wPersonaText = "";
+                    rebuild();
+                }));
+    }
+
+    private void buildPersonaForm() {
+        int x = secX(), w = secW();
+        int fy = secY0() + 14;
+        personaNameInput = field(x, fy + 11, w, 48, wPersonaName);
+        // Roomy multi-line editor for the persona description (a paragraph, not one line): from below the
+        // name field down to just above the Save row.
+        int ty = fy + 44;
+        int th = (top + PANEL_H - PAD - 22) - ty;
+        personaTextArea = new net.minecraft.client.gui.components.MultiLineEditBox(
+                font, x, ty, w, th,
+                Component.translatable("numen.persona.text_placeholder"), Component.empty());
+        personaTextArea.setValue(wPersonaText);
+        personaTextArea.setCharacterLimit(4096);
+        add(personaTextArea);
+        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> onSavePersona()));
+        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+                Component.literal("✕"), b -> { addingPersona = false; personaEditId = null; rebuild(); }));
+        setInitialFocus(personaNameInput);
+    }
+
+    private void buildPersonaDeleteConfirm() {
+        int x = secX();
+        int by = secY0() + 24;
+        int bw = 64, gap = 8;
+        add(new SimpleButton(x, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
+            com.dwinovo.numen.persona.PersonaLibrary.instance().remove(personaDeletePending);
+            personaDeletePending = null;
+            rebuild();
+        }));
+        add(new SimpleButton(x + bw + gap, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { personaDeletePending = null; rebuild(); }));
+    }
+
+    private void onSavePersona() {
+        String name = personaNameInput.getValue().trim();
+        String text = personaTextArea == null ? "" : personaTextArea.getValue().trim();
+        if (name.isEmpty() || text.isEmpty()) { warnUntil = System.currentTimeMillis() + 4000; return; }
+        var lib = com.dwinovo.numen.persona.PersonaLibrary.instance();
+        if (personaEditId != null) {
+            PersonaLibrary.Persona old = lib.get(personaEditId);
+            String oldName = old != null ? old.name() : null;
+            lib.update(personaEditId, name, text);
+            // Propagate the edit to any loaded companion currently using this persona: a live switch with
+            // a reconciliation message (match by library id, or by the old name for pre-id companions).
+            for (UUID cu : AgentLoopRegistry.loadedEntityUuids()) {
+                EntityAgentLoop l = AgentLoopRegistry.get(cu).orElse(null);
+                if (l == null) continue;
+                boolean uses = personaEditId.equals(l.personaId())
+                        || (l.personaId() == null && oldName != null && oldName.equals(l.personaName()));
+                if (uses) l.setPersona(personaEditId, text, name);
+            }
+        } else {
+            lib.create(name, text);
+        }
+        addingPersona = false;
+        personaEditId = null;
+        wPersonaName = ""; wPersonaText = "";
+        rebuild();
+    }
+
+    private void buildMcpDeleteConfirm() {
+        int x = secX();
+        int by = secY0() + 24;
+        int bw = 64, gap = 8;
+        add(new SimpleButton(x, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
+            com.dwinovo.numen.mcp.client.McpClientManager.deleteServer(mcpDeletePending);
+            mcpDeletePending = null;
+            rebuild();
+        }));
+        add(new SimpleButton(x + bw + gap, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { mcpDeletePending = null; rebuild(); }));
+    }
+
+    private void buildMcpListWidgets() {
+        // "add server" affordance, top-right of the section.
+        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable("numen.mcp.add"), b -> {
+                    addingMcp = true; mcpEditOriginal = null;                 // fresh add — not editing
+                    wMcpName = ""; wMcpTarget = ""; wMcpHeader = ""; mcpStdio = false;
+                    rebuild();
+                }));
+    }
+
+    /** The add-MCP-server form: name, type (http/stdio) toggle, and URL / command. */
+    private void buildMcpForm() {
+        int x = secX(), w = secW();
+        int fy = secY0() + 14;     // start below the "MCP 工具" title so nothing overlaps
+        mcpNameInput = field(x, fy + 11, w, 48, wMcpName);
+        // type toggle button (cycles http ↔ stdio; rebuild swaps the URL/command row)
+        add(new SimpleButton(x, fy + 34, w, 18,
+                Component.translatable(mcpStdio ? "numen.mcp.type_stdio" : "numen.mcp.type_http"),
+                b -> { preserveMcpForm(); mcpStdio = !mcpStdio; rebuild(); }));
+        mcpTargetInput = field(x, fy + 67, w, 512, wMcpTarget);
+        // 4th field: HTTP → request header(s) "Name: Value"; stdio → env "KEY=value" (';'-separated).
+        mcpHeaderInput = field(x, fy + 100, w, 1024, wMcpHeader);
+        // Save + Cancel
+        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> onSaveMcp()));
+        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+                Component.literal("✕"), b -> { addingMcp = false; mcpEditOriginal = null; rebuild(); }));
+        setInitialFocus(mcpNameInput);   // ready to type the name immediately
+    }
+
+    private void preserveMcpForm() {
+        if (mcpNameInput != null) wMcpName = mcpNameInput.getValue();
+        if (mcpTargetInput != null) wMcpTarget = mcpTargetInput.getValue();
+        if (mcpHeaderInput != null) wMcpHeader = mcpHeaderInput.getValue();
+    }
+
+    private void onSaveMcp() {
+        String name = mcpNameInput.getValue().trim();
+        String target = mcpTargetInput.getValue().trim();
+        if (name.isEmpty() || target.isEmpty()) { warnUntil = System.currentTimeMillis() + 4000; return; }
+        // When editing, preserve the server's on/off state (a plain edit shouldn't flip its toggle).
+        boolean enabled = true;
+        if (mcpEditOriginal != null) {
+            var orig = com.dwinovo.numen.mcp.client.McpClientManager.spec(mcpEditOriginal);
+            if (orig != null) enabled = orig.enabled();
+        }
+        com.dwinovo.numen.mcp.client.McpClientConfig.ServerSpec spec;
+        String extra = mcpHeaderInput == null ? "" : mcpHeaderInput.getValue();
+        if (mcpStdio) {
+            String[] parts = target.split("\\s+");
+            String command = parts[0];
+            List<String> args = new ArrayList<>();
+            for (int i = 1; i < parts.length; i++) args.add(parts[i]);
+            spec = new com.dwinovo.numen.mcp.client.McpClientConfig.ServerSpec(name, "stdio", "", java.util.Map.of(),
+                    command, List.copyOf(args), parseEnv(extra), enabled, 20, 120);
+        } else {
+            spec = new com.dwinovo.numen.mcp.client.McpClientConfig.ServerSpec(name, "http", target, parseHeader(extra),
+                    "", List.of(), java.util.Map.of(), enabled, 20, 120);
+        }
+        com.dwinovo.numen.mcp.client.McpClientManager.upsertServer(spec);
+        // Renamed while editing → upsert wrote the new-named entry; drop the old one.
+        if (mcpEditOriginal != null && !mcpEditOriginal.equals(name)) {
+            com.dwinovo.numen.mcp.client.McpClientManager.deleteServer(mcpEditOriginal);
+        }
+        mcpEditOriginal = null;
+        addingMcp = false;
+        wMcpName = ""; wMcpTarget = ""; wMcpHeader = ""; mcpStdio = false;
+        rebuild();
+    }
+
+    /** Parse "Name: Value" header lines (multiple separated by ';' or newline) into a map. */
+    private static java.util.Map<String, String> parseHeader(String line) {
+        return parsePairs(line, ':');
+    }
+
+    /** Parse "KEY=value" env lines (multiple separated by ';' or newline) into a map. */
+    private static java.util.Map<String, String> parseEnv(String line) {
+        return parsePairs(line, '=');
+    }
+
+    private static java.util.Map<String, String> parsePairs(String line, char sep) {
+        String s = line == null ? "" : line.trim();
+        if (s.isEmpty()) return java.util.Map.of();
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        for (String part : s.split("[;\\n]")) {
+            String p = part.trim();
+            int i = p.indexOf(sep);
+            if (i <= 0) continue;
+            String k = p.substring(0, i).trim();
+            String v = p.substring(i + 1).trim();
+            if (!k.isEmpty() && !v.isEmpty()) out.put(k, v);
+        }
+        return java.util.Map.copyOf(out);
+    }
+
+    private void buildSkillsWidgets() {
+        // "open skills folder" affordance, top-right of the section.
+        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable("numen.skill.open_dir"), b -> openSkillsFolder()));
+    }
+
+    private static void openSkillsFolder() {
+        try {
+            java.nio.file.Path dir = Minecraft.getInstance().gameDirectory.toPath()
+                    .resolve("config").resolve(com.dwinovo.numen.Constants.MOD_ID).resolve("skills");
+            java.nio.file.Files.createDirectories(dir);
+            net.minecraft.Util.getPlatform().openUri(dir.toUri());
+        } catch (Exception ex) {
+            com.dwinovo.numen.Constants.LOG.warn("[numen] open skills folder failed: {}", ex.toString());
+        }
+    }
+
+    private void buildLlmWidgets() {
+        int x = secX(), w = secW();
+        int y0 = secY0();
 
         if (addingSite) {
+            // The provider picker is stale in add-site mode (it still holds the "+ 添加站点" sentinel and
+            // its bounds overlap the site-name field, stealing that field's clicks so the name can never be
+            // typed → Save early-returns). Drop it entirely while the add-site form is up.
+            providerDropdown = null;
             // row0: site name + cancel
             siteNameInput = field(x, y0 + 11, w - 20, 64, wSiteName);
             add(new SimpleButton(x + w - 18, y0 + 11, 18, 18, Component.literal("✕"),
@@ -400,6 +698,7 @@ public final class NumenScreen extends Screen {
             buildApiKeyRow(x, y0 + SET_SP + 11, w);
             modelInput = field(x, y0 + 2 * SET_SP + 11, w, 128, wModel);
             baseUrlInput = field(x, y0 + 3 * SET_SP + 11, w, 256, wBaseUrl);
+            setInitialFocus(siteNameInput);   // ready to type the name immediately (no click needed)
         } else {
             providerDropdown = new ProviderDropdown(wProvider, true);   // live + "+ 添加站点"
             providerDropdown.setBounds(x, y0 + 11, w, 18);
@@ -407,16 +706,22 @@ public final class NumenScreen extends Screen {
             buildModelRow(x, y0 + 2 * SET_SP + 11, w);
             baseUrlInput = field(x, y0 + 3 * SET_SP + 11, w, 256, wBaseUrl);
             proxyInput = field(x, y0 + 4 * SET_SP + 11, w, 128, wProxy);
+            // Reasoning/thinking effort cycle — a compact button in the bottom band, left of Save.
+            add(new SimpleButton(x, top + PANEL_H - PAD - 18, 118, 18, reasoningLabel(),
+                    b -> { cycleReasoning(); b.setMessage(reasoningLabel()); }));
         }
 
         add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18,
-                64, 18, Component.literal("Save"), b -> onSaveSettings()));
+                64, 18, Component.translatable("numen.gui.settings.save"), b -> onSaveSettings()));
     }
 
     private void buildApiKeyRow(int x, int y, int w) {
         int eyeW = 22;
         apiKeyInput = field(x, y, w - eyeW - 2, 512, wApiKey);
-        apiKeyInput.setFormatter((text, idx) -> showKey
+        // Show the real key while editing (focused) or when revealed via the eye — masking with a
+        // fixed "•" mis-sizes against the variable-width font, so a long key drifts the caret and
+        // leaves gaps while typing. When unfocused + hidden, mask it for shoulder-surfing.
+        apiKeyInput.setFormatter((text, idx) -> (showKey || (apiKeyInput != null && apiKeyInput.isFocused()))
                 ? FormattedCharSequence.forward(text, net.minecraft.network.chat.Style.EMPTY)
                 : FormattedCharSequence.forward("•".repeat(text.length()), net.minecraft.network.chat.Style.EMPTY));
         // Eye icon instead of a 见/隐 glyph: open eye when masked (click to show), slashed when shown.
@@ -451,7 +756,7 @@ public final class NumenScreen extends Screen {
     private List<Dropdown.Item> modelItems(ModelRegistry.Provider mp) {
         List<Dropdown.Item> items = new ArrayList<>();
         if (mp != null) for (ModelRegistry.Model m : mp.models()) items.add(new Dropdown.Item(m.id(), m.id()));
-        items.add(new Dropdown.Item(CUSTOM_MODEL, "自定义…"));
+        items.add(new Dropdown.Item(CUSTOM_MODEL, I18n.get("numen.settings.custom_model")));
         return items;
     }
 
@@ -504,30 +809,470 @@ public final class NumenScreen extends Screen {
         cfg.setModel(model);
         cfg.setBaseUrl(baseUrlInput.getValue());
         cfg.setProxy(proxyInput == null ? wProxy : proxyInput.getValue());
+        cfg.setReasoningEffort(wReasoning);
         cfg.save();
         NumenLlmClient.reset();
         savedFlashUntil = System.currentTimeMillis() + 1500;
     }
 
+    // ---- reasoning / thinking effort control ----
+
+    private static final String[] REASONING_LEVELS = {"auto", "low", "medium", "high"};
+
+    /** Coerce any stored value to one of {@link #REASONING_LEVELS} ("auto" = leave to backend default). */
+    private static String normalizeReasoning(String v) {
+        if (v == null) return "auto";
+        String s = v.trim().toLowerCase();
+        for (String lvl : REASONING_LEVELS) if (lvl.equals(s)) return lvl;
+        return "auto";
+    }
+
+    /** Advance the working reasoning level auto → low → medium → high → auto. Saved with the rest on Save. */
+    private void cycleReasoning() {
+        String cur = normalizeReasoning(wReasoning);
+        for (int i = 0; i < REASONING_LEVELS.length; i++) {
+            if (REASONING_LEVELS[i].equals(cur)) {
+                wReasoning = REASONING_LEVELS[(i + 1) % REASONING_LEVELS.length];
+                return;
+            }
+        }
+        wReasoning = "auto";
+    }
+
+    private Component reasoningLabel() {
+        return Component.translatable("numen.settings.reasoning",
+                I18n.get("numen.settings.reasoning." + normalizeReasoning(wReasoning)));
+    }
+
     private void renderSettings(GuiGraphics g, int mouseX, int mouseY) {
-        int x = left + PAD;
-        int y0 = top + HEADER_H + 8;
+        renderSettingsNav(g);
+        switch (settingsSection) {
+            case LLM -> renderLlmSettings(g);
+            case MCP -> renderMcpSection(g, mouseX, mouseY);
+            case SKILLS -> renderSkillsSection(g, mouseX, mouseY);
+            case PERSONA -> renderPersonaSection(g, mouseX, mouseY);
+        }
+    }
+
+    /** The config-hub left sub-nav: 模型接入 / MCP / 技能, plus the divider. */
+    private void renderSettingsNav(GuiGraphics g) {
+        String[] labels = {
+                I18n.get("numen.settings.nav.llm"), I18n.get("numen.settings.nav.mcp"),
+                I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona")};
+        int navX = left + PAD;
+        int y = secY0();
+        for (int i = 0; i < labels.length; i++) {
+            boolean active = settingsSection == SettingsSection.values()[i];
+            int ry = y + i * NAV_SP;
+            if (active) {
+                g.fill(navX - 2, ry - 3, navX - 1, ry + NAV_SP - 5, ACCENT);   // gold left bar
+                txt(g, Component.literal(labels[i]), navX + 3, ry, TXT);
+            } else {
+                txt(g, Component.literal(labels[i]), navX + 3, ry, TXT_MUTED);
+            }
+        }
+        int dx = left + PAD + NAV_W + 3;
+        g.fill(dx, secY0() - 2, dx + 1, secBottom(), BORDER);   // vertical divider
+    }
+
+    private void renderLlmSettings(GuiGraphics g) {
+        int x = secX();
+        int y0 = secY0();
         if (addingSite) {
-            txt(g, Component.literal("Site name"), x, y0, TXT_MUTED);
-            txt(g, Component.literal("API Key"), x, y0 + SET_SP, TXT_MUTED);
-            txt(g, Component.literal("Model"), x, y0 + 2 * SET_SP, TXT_MUTED);
-            txt(g, Component.literal("Base URL"), x, y0 + 3 * SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.settings.site_name"), x, y0, TXT_MUTED);
+            txt(g, Component.translatable("numen.gui.settings.api_key"), x, y0 + SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.gui.settings.model"), x, y0 + 2 * SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.settings.base_url"), x, y0 + 3 * SET_SP, TXT_MUTED);
         } else {
-            txt(g, Component.literal("Provider"), x, y0, TXT_MUTED);
-            txt(g, Component.literal("API Key"), x, y0 + SET_SP, TXT_MUTED);
-            txt(g, Component.literal("Model"), x, y0 + 2 * SET_SP, TXT_MUTED);
-            txt(g, Component.literal("Base URL"), x, y0 + 3 * SET_SP, TXT_MUTED);
-            txt(g, Component.literal("Proxy"), x, y0 + 4 * SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.gui.settings.provider"), x, y0, TXT_MUTED);
+            txt(g, Component.translatable("numen.gui.settings.api_key"), x, y0 + SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.gui.settings.model"), x, y0 + 2 * SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.settings.base_url"), x, y0 + 3 * SET_SP, TXT_MUTED);
+            txt(g, Component.translatable("numen.settings.proxy"), x, y0 + 4 * SET_SP, TXT_MUTED);
         }
         if (savedFlashUntil > System.currentTimeMillis()) {
-            txt(g, Component.literal("✔ saved"), x, top + PANEL_H - PAD - 14, OK);
+            txt(g, Component.translatable("numen.settings.saved"), x, top + PANEL_H - PAD - 14, OK);
         }
         // the dropdowns themselves render in render, AFTER the widgets (open list on top)
+    }
+
+    // ---- MCP section: external server list with a live on/off switch per row ----
+
+    private void renderMcpSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        txt(g, Component.translatable("numen.mcp.title"), x, secY0() - 2, TXT);
+        if (mcpDeletePending != null) {
+            txt(g, Component.translatable("numen.mcp.delete_confirm", mcpDeletePending), x, secY0() + 10, TXT);
+            return;
+        }
+        if (addingMcp) { renderMcpForm(g); return; }
+        var servers = com.dwinovo.numen.mcp.client.McpClientManager.servers();
+        if (servers.isEmpty()) {
+            txt(g, Component.translatable("numen.mcp.empty"), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
+        for (int i = settingsScroll; i < servers.size(); i++) {
+            int row = i - settingsScroll;
+            int ry = listY0 + row * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var h = servers.get(i);
+            int togX = x + w - 34, delX = x + w - 12;
+            // status dot
+            int dy = ry + 3;
+            g.fill(x, dy, x + 5, dy + 5, mcpDotColor(h.status()));
+            Nb.border(g, x, dy, 5, 5, 1, BORDER);
+            // name + meta line
+            txt(g, Component.literal(h.name()), x + 10, ry + 1, TXT);
+            txt(g, Component.literal(mcpMeta(h)), x + 10, ry + 11, TXT_FAINT);
+            // toggle + delete, right-aligned
+            drawToggle(g, togX, ry + 5, h.toggledOn());
+            boolean overDel = overDelete(mouseX, mouseY, delX, ry);
+            txt(g, Component.literal("✕"), delX, ry + 6, overDel ? FAIL : TXT_FAINT);
+            // hover tooltip: tool names + url/command + any error (not over a control)
+            if (overRow(mouseX, mouseY, x, w, ry) && !overToggle(mouseX, mouseY, togX, ry + 5) && !overDel) {
+                pendingTip = mcpTooltip(h);
+                pendingTipX = mouseX;
+                pendingTipY = mouseY;
+            }
+        }
+    }
+
+    /** Add-server form labels + placeholders (fields/buttons are widgets, drawn in the overlay pass). */
+    private void renderMcpForm(GuiGraphics g) {
+        int x = secX();
+        int fy = secY0() + 14;   // matches buildMcpForm
+        txt(g, Component.translatable("numen.mcp.form_name"), x, fy, TXT_MUTED);
+        // the type row is the self-labelled toggle button (no separate label)
+        txt(g, Component.translatable(mcpStdio ? "numen.mcp.form_command" : "numen.mcp.form_url"),
+                x, fy + 56, TXT_MUTED);
+        txt(g, Component.translatable(mcpStdio ? "numen.mcp.form_env" : "numen.mcp.form_header"), x, fy + 89, TXT_MUTED);
+        // field placeholders are drawn in the post-widget pass (see render), so they sit above the frames
+    }
+
+    private boolean overDelete(int mx, int my, int delX, int ry) {
+        return mx >= delX - 2 && mx < delX + 9 && my >= ry + 2 && my < ry + LIST_ROW - 2;
+    }
+
+    private int mcpDotColor(com.dwinovo.numen.mcp.client.McpClientManager.Status s) {
+        return switch (s) {
+            case CONNECTED -> OK;
+            case CONNECTING -> RUN;
+            case FAILED -> FAIL;
+            case DISABLED -> TXT_FAINT;
+        };
+    }
+
+    private String mcpMeta(com.dwinovo.numen.mcp.client.McpClientManager.ServerHandle h) {
+        return switch (h.status()) {
+            case CONNECTED -> I18n.get("numen.mcp.connected", h.type(), h.toolCount());
+            case CONNECTING -> I18n.get("numen.mcp.connecting", h.type());
+            case FAILED -> I18n.get("numen.mcp.failed", h.type());
+            case DISABLED -> I18n.get("numen.mcp.disabled", h.type());
+        };
+    }
+
+    private List<Component> mcpTooltip(com.dwinovo.numen.mcp.client.McpClientManager.ServerHandle h) {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal(h.name()));
+        var spec = com.dwinovo.numen.mcp.client.McpClientManager.spec(h.name());
+        if (spec != null) {
+            lines.add(Nb.colored(spec.isStdio() ? spec.command() : spec.url(), TXT_FAINT));
+        }
+        if (h.status() == com.dwinovo.numen.mcp.client.McpClientManager.Status.FAILED && !h.error().isBlank()) {
+            lines.add(Nb.colored(h.error(), FAIL));
+        } else if (!h.toolNames().isEmpty()) {
+            lines.add(Nb.colored(String.join(", ", h.toolNames()), TXT_MUTED));
+        }
+        return lines;
+    }
+
+    // ---- Skills section: skill list with a live on/off switch per row ----
+
+    private void renderSkillsSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        txt(g, Component.translatable("numen.skill.title"), x, secY0() - 2, TXT);
+        var skills = new ArrayList<>(com.dwinovo.numen.agent.skill.SkillRegistry.instance().all());
+        if (skills.isEmpty()) {
+            txt(g, Component.translatable("numen.skill.empty"), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
+        for (int i = settingsScroll; i < skills.size(); i++) {
+            int row = i - settingsScroll;
+            int ry = listY0 + row * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var s = skills.get(i);
+            boolean on = !com.dwinovo.numen.agent.skill.SkillRegistry.instance().isDisabled(s.name());
+            txt(g, Component.literal(s.name()), x, ry + 1, on ? TXT : TXT_FAINT);
+            String desc = s.description() == null ? I18n.get("numen.skill.no_desc") : s.description();
+            txt(g, Component.literal(clip(desc, w - 26)), x, ry + 11, TXT_FAINT);
+            drawToggle(g, x + w - 20, ry + 5, on);
+            if (overRow(mouseX, mouseY, x, w, ry) && !overToggle(mouseX, mouseY, x + w - 20, ry + 5)
+                    && s.description() != null) {
+                pendingTip = List.of(Component.literal(s.name()), Nb.colored(s.description(), TXT_MUTED));
+                pendingTipX = mouseX;
+                pendingTipY = mouseY;
+            }
+        }
+    }
+
+    private static final java.util.regex.Pattern QUERY_PAT =
+            java.util.regex.Pattern.compile("(?s)<query>(.*?)</query>");
+
+    /**
+     * The owner's own words from a user message, for display. New messages wrap the owner's text in
+     * {@code <query>…</query>} (see {@code EntityAgentLoop.submitPrompt}), so we show only that; legacy
+     * untagged messages fall back to the raw text with injected directives stripped. Display-only — the
+     * LLM still receives the full user message.
+     */
+    private static String ownerText(String s) {
+        if (s == null) return "";
+        java.util.regex.Matcher m = QUERY_PAT.matcher(s);
+        StringBuilder b = new StringBuilder();
+        while (m.find()) {
+            if (b.length() > 0) b.append('\n');
+            b.append(m.group(1));
+        }
+        if (b.length() > 0) return b.toString().strip();
+        return stripInjectedDirectives(s);   // legacy / untagged owner message
+    }
+
+    /**
+     * Strip numen-injected directive blocks ({@code <persona-change>…</persona-change>},
+     * {@code <event …>…</event>}) from a user message so only the owner's own words show in chat.
+     * The full message (directives included) is still what the LLM receives — this is display-only.
+     */
+    private static String stripInjectedDirectives(String s) {
+        if (s == null) return "";
+        String out = s.replaceAll("(?s)<persona-change>.*?</persona-change>", "")
+                .replaceAll("(?s)<event\\b[^>]*>.*?</event>", "")
+                .replaceAll("(?s)<event\\b[^>]*/>", "");
+        return out.strip();
+    }
+
+    /** Truncate {@code s} with an ellipsis so it fits in {@code maxW} px. */
+    private String clip(String s, int maxW) {
+        if (font.width(s) <= maxW) return s;
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            if (font.width(b.toString() + s.charAt(i) + "…") > maxW) break;
+            b.append(s.charAt(i));
+        }
+        return b + "…";
+    }
+
+    // ---- shared toggle switch (no vanilla widget for this) ----
+
+    private static final int TOG_W = 18, TOG_H = 10;
+
+    private void drawToggle(GuiGraphics g, int x, int y, boolean on) {
+        g.fill(x, y, x + TOG_W, y + TOG_H, on ? CTA : FIELD);
+        Nb.border(g, x, y, TOG_W, TOG_H, 1, BORDER);
+        int knobX = on ? x + TOG_W - 8 : x + 1;
+        g.fill(knobX, y + 1, knobX + 7, y + TOG_H - 1, ON_CTA);
+    }
+
+    private boolean overToggle(int mx, int my, int x, int y) {
+        return mx >= x && mx < x + TOG_W && my >= y && my < y + TOG_H;
+    }
+
+    private boolean overRow(int mx, int my, int x, int w, int ry) {
+        return mx >= x && mx < x + w && my >= ry && my < ry + LIST_ROW;
+    }
+
+    /** Settings-tab clicks: the sub-nav column, then per-row toggles in the MCP / skill lists. */
+    private boolean settingsClickedAt(double mxd, double myd) {
+        int mx = (int) mxd, my = (int) myd;
+        int navX = left + PAD, y = secY0();
+        if (mx >= navX && mx < navX + NAV_W) {
+            for (int i = 0; i < SettingsSection.values().length; i++) {
+                int ry = y + i * NAV_SP;
+                if (my >= ry - 3 && my < ry + NAV_SP - 5) {
+                    selectSection(SettingsSection.values()[i]);
+                    return true;
+                }
+            }
+        }
+        if (settingsSection == SettingsSection.MCP) return mcpToggleClick(mx, my);
+        if (settingsSection == SettingsSection.SKILLS) return skillToggleClick(mx, my);
+        if (settingsSection == SettingsSection.PERSONA) return personaClick(mx, my);
+        return false;
+    }
+
+    private boolean mcpToggleClick(int mx, int my) {
+        if (addingMcp || mcpDeletePending != null) return false;   // form / confirm widgets handle clicks
+        int x = secX(), w = secW();
+        var servers = com.dwinovo.numen.mcp.client.McpClientManager.servers();
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
+        for (int i = scroll; i < servers.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            int togX = x + w - 34, delX = x + w - 12;
+            var h = servers.get(i);
+            if (overToggle(mx, my, togX, ry + 5)) {
+                var st = h.status();
+                // CONNECTED / CONNECTING → turn off; DISABLED / FAILED → (re)connect (retry a failed one)
+                if (st == com.dwinovo.numen.mcp.client.McpClientManager.Status.CONNECTED
+                        || st == com.dwinovo.numen.mcp.client.McpClientManager.Status.CONNECTING) {
+                    com.dwinovo.numen.mcp.client.McpClientManager.disableServer(h.name());
+                } else {
+                    com.dwinovo.numen.mcp.client.McpClientManager.enableServer(h.name());
+                }
+                return true;
+            }
+            if (overDelete(mx, my, delX, ry)) {
+                mcpDeletePending = h.name();   // ask first — deletion is confirmed via the bar
+                rebuild();
+                return true;
+            }
+            if (overRow(mx, my, x, w, ry)) {   // body (name/meta) click → edit this server
+                beginEditMcp(h.name());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Open the add-form PRE-FILLED with {@code name}'s current spec — saving REPLACES the entry. */
+    private void beginEditMcp(String name) {
+        var spec = com.dwinovo.numen.mcp.client.McpClientManager.spec(name);
+        if (spec == null) return;
+        mcpEditOriginal = name;
+        addingMcp = true;
+        mcpStdio = spec.isStdio();
+        wMcpName = spec.name();
+        if (mcpStdio) {
+            StringBuilder cmd = new StringBuilder(spec.command() == null ? "" : spec.command());
+            for (String a : spec.args()) cmd.append(' ').append(a);
+            wMcpTarget = cmd.toString().trim();
+            wMcpHeader = joinPairs(spec.env(), '=');       // stdio → env "KEY=value"
+        } else {
+            wMcpTarget = spec.url() == null ? "" : spec.url();
+            wMcpHeader = joinPairs(spec.headers(), ':');    // http → header "Name: Value"
+        }
+        rebuild();
+    }
+
+    /** Reconstruct the header/env editor line from a spec map ("K: V; K2: V2" or "K=V; K2=V2"). */
+    private static String joinPairs(java.util.Map<String, String> m, char sep) {
+        if (m == null || m.isEmpty()) return "";
+        StringBuilder b = new StringBuilder();
+        for (var e : m.entrySet()) {
+            if (b.length() > 0) b.append("; ");
+            b.append(e.getKey()).append(sep == ':' ? ": " : "=").append(e.getValue());
+        }
+        return b.toString();
+    }
+
+    // ---- Persona section render + hit-test ----
+
+    private void renderPersonaSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        txt(g, Component.translatable("numen.persona.title"), x, secY0() - 2, TXT);
+        if (personaDeletePending != null) {
+            PersonaLibrary.Persona p = PersonaLibrary.instance().get(personaDeletePending);
+            txt(g, Component.translatable("numen.persona.delete_confirm", p != null ? p.name() : ""),
+                    x, secY0() + 10, TXT);
+            return;
+        }
+        if (addingPersona) { renderPersonaForm(g); return; }
+        var list = PersonaLibrary.instance().list();
+        if (list.isEmpty()) {
+            txt(g, Component.translatable("numen.persona.empty"), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = settingsScroll; i < list.size(); i++) {
+            int ry = listY0 + (i - settingsScroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            PersonaLibrary.Persona p = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            txt(g, Component.literal(p.name()), x, ry + 1, TXT);
+            String badge = p.preset() ? I18n.get("numen.persona.preset_badge") + " · " : "";
+            txt(g, Component.literal(clip(badge + p.text(), w - 30)), x, ry + 11, TXT_FAINT);
+            if (p.preset()) {
+                txt(g, Component.literal("⧉"), delX, ry + 6,
+                        overDelete(mouseX, mouseY, delX, ry) ? CTA : TXT_FAINT);
+            } else {
+                txt(g, Component.literal("✎"), editX, ry + 6,
+                        overDelete(mouseX, mouseY, editX, ry) ? CTA : TXT_FAINT);
+                txt(g, Component.literal("✕"), delX, ry + 6,
+                        overDelete(mouseX, mouseY, delX, ry) ? FAIL : TXT_FAINT);
+            }
+        }
+    }
+
+    private void renderPersonaForm(GuiGraphics g) {
+        int x = secX();
+        int fy = secY0() + 14;
+        txt(g, Component.translatable("numen.persona.form_name"), x, fy, TXT_MUTED);
+        txt(g, Component.translatable("numen.persona.form_text"), x, fy + 33, TXT_MUTED);
+    }
+
+    /** The active companion's current persona name (green marker in the list), or null. */
+    private String activePersonaName() {
+        if (uuid == null) return null;
+        return AgentLoopRegistry.get(uuid).map(EntityAgentLoop::personaName).orElse(null);
+    }
+
+    private boolean personaClick(int mx, int my) {
+        if (addingPersona || personaDeletePending != null) return false;
+        int x = secX(), w = secW();
+        var lib = PersonaLibrary.instance();
+        var list = lib.list();
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = scroll; i < list.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            PersonaLibrary.Persona p = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            if (p.preset()) {
+                if (overDelete(mx, my, delX, ry)) { lib.clonePersona(p.id()); rebuild(); return true; }
+            } else {
+                if (overDelete(mx, my, editX, ry)) { beginEditPersona(p); return true; }
+                if (overDelete(mx, my, delX, ry)) { personaDeletePending = p.id(); rebuild(); return true; }
+                if (overRow(mx, my, x, w, ry)) { beginEditPersona(p); return true; }   // body → edit a custom persona
+            }
+        }
+        return false;
+    }
+
+    private void beginEditPersona(PersonaLibrary.Persona p) {
+        addingPersona = true;
+        personaEditId = p.id();
+        wPersonaName = p.name();
+        wPersonaText = p.text();
+        rebuild();
+    }
+
+    private boolean skillToggleClick(int mx, int my) {
+        int x = secX(), w = secW();
+        var reg = com.dwinovo.numen.agent.skill.SkillRegistry.instance();
+        var skills = new ArrayList<>(reg.all());
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
+        for (int i = scroll; i < skills.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            if (overToggle(mx, my, x + w - 20, ry + 5)) {
+                String n = skills.get(i).name();
+                reg.setEnabled(n, reg.isDisabled(n));   // flip
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -584,8 +1329,11 @@ public final class NumenScreen extends Screen {
     private void doSummon() {
         String n = summonInput == null ? "" : summonInput.getValue().trim();
         if (n.isEmpty()) return;
+        // Remember the picked persona by name; CompanionListPayload applies it when the new companion arrives.
+        if (summonPersonaId != null) com.dwinovo.numen.persona.PersonaLibrary.pendSummon(n, summonPersonaId);
         Services.NETWORK.sendToServer(new com.dwinovo.numen.network.payload.SummonRequestPayload(n));
         summoning = false;
+        summonPersonaId = null;
         rebuild();   // the new companion arrives via CompanionListPayload — click its avatar to open
     }
 
@@ -595,10 +1343,17 @@ public final class NumenScreen extends Screen {
             return super.mouseClicked(mouseX, mouseY, button);   // modal confirm — let its Cancel/Delete buttons handle it
         }
         if (button == 0) {
+            // Summon persona dropdown gets first pick (its open list overlays the panel).
+            if (summoning && summonPersonaDropdown != null && summonPersonaDropdown.mouseClicked(mouseX, mouseY)) {
+                String sel = summonPersonaDropdown.selectedId();
+                summonPersonaId = PERSONA_DEFAULT.equals(sel) ? null : sel;
+                return true;
+            }
             UUID close = railCloseAt((int) mouseX, (int) mouseY);
             if (close != null) { dismissPending = close; rebuild(); return true; }   // ✕ → confirm bar
             if (railPlusAt((int) mouseX, (int) mouseY)) {   // + → start the summon name prompt
                 summoning = !summoning;
+                if (summoning) summonPersonaId = null;   // fresh summon starts at "默认"
                 rebuild();
                 return true;
             }
@@ -645,6 +1400,7 @@ public final class NumenScreen extends Screen {
                 }
                 return true;
             }
+            if (tab == Tab.SETTINGS && settingsClickedAt(mouseX, mouseY)) return true;
             int my = (int) mouseY;
             if (my >= top && my < top + HEADER_H) {
                 for (int i = 0; i < 3; i++) {
@@ -687,6 +1443,18 @@ public final class NumenScreen extends Screen {
             pinBottom = scroll >= lastMaxScroll;
             return true;
         }
+        if (tab == Tab.SETTINGS && delta != 0 && settingsSection != SettingsSection.LLM && !addingPersona) {
+            int count = switch (settingsSection) {
+                case MCP -> com.dwinovo.numen.mcp.client.McpClientManager.servers().size();
+                case SKILLS -> com.dwinovo.numen.agent.skill.SkillRegistry.instance().size();
+                case PERSONA -> PersonaLibrary.instance().list().size();
+                default -> 0;
+            };
+            int listY0 = secY0() + 14;
+            int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+            settingsScroll = Mth.clamp((int) (settingsScroll - delta), 0, Math.max(0, count - visible));
+            return true;
+        }
         return super.mouseScrolled(mx, my, delta);
     }
 
@@ -695,29 +1463,33 @@ public final class NumenScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
         super.render(g, mouseX, mouseY, partial);
+        pendingTip = null;   // recollected each frame by the section renderers
 
         // ONE merged Cottage sprite: left rail column + panel, continuous header, no gap.
-        GuiCompat.blitSprite(g,
+        GuiCompat.blitSprite(g, 
                 WORKSPACE_SPRITE, railX, top, RAIL_W + PANEL_W, PANEL_H);
         renderRail(g, mouseX, mouseY);   // avatars + status + summon tile on the rail column
 
         txt(g, Component.literal(name == null ? "Numen" : name), left + PAD, top + 7, ON_BAND);
+        int afterName = left + PAD + font.width(name == null ? "Numen" : name) + 6;
         if (uuid != null && ClientDeaths.isDead(uuid)) {        // active companion dead — respawn countdown
             long rem = ClientDeaths.remainingMs(uuid);
-            txt(g, Component.literal("· 复活中 " + (int) Math.ceil(rem / 1000.0) + "s"),
-                    left + PAD + font.width(name == null ? "Numen" : name) + 6, top + 7, ON_BAND);
+            txt(g, Component.translatable("numen.respawn", (int) Math.ceil(rem / 1000.0)), afterName, top + 7, ON_BAND);
+        } else {
+            String pn = activePersonaName();                   // current persona, faint, right after the name
+            if (pn != null) txt(g, Component.literal(pn), afterName, top + 7, ON_BAND_FAINT);
         }
         renderTabs(g, mouseX, mouseY);
 
         if (dismissPending != null) {
-            txt(g, Component.literal("删除同伴 \"" + nameFor(dismissPending) + "\"？"),
+            txt(g, Component.translatable("numen.dismiss.title", nameFor(dismissPending)),
                     left + PAD, top + HEADER_H + 12, TXT);
-            txt(g, Component.literal("永久删除 · 背包会掉落在原地 · 无法撤销"),
+            txt(g, Component.translatable("numen.dismiss.warning"),
                     left + PAD, top + HEADER_H + 30, FAIL);
         } else if (summoning) {
-            txt(g, Component.literal("Summon a companion"), left + PAD, top + HEADER_H + 8, TXT);
-            txt(g, Component.literal("type a name · Enter to confirm · Esc to cancel"),
-                    left + PAD, top + HEADER_H + 48, TXT_FAINT);
+            txt(g, Component.translatable("numen.summon.title"), left + PAD, top + HEADER_H + 8, TXT);
+            txt(g, Component.translatable("numen.summon.hint"),
+                    left + PAD, top + HEADER_H + 74, TXT_FAINT);
         } else {
             if (uuid != null) {
                 if (compactButton != null) compactButton.active = loop().canCompact();
@@ -729,7 +1501,7 @@ public final class NumenScreen extends Screen {
                 case ITEMS -> { if (uuid != null) renderItems(g, mouseX, mouseY); else emptyHint(g); }
             }
             if (tab == Tab.CHAT && warnUntil > System.currentTimeMillis()) {   // no-API-key hint above the input
-                txt(g, Component.literal("⚠ No API key — open Settings to add one"),
+                txt(g, Component.translatable("numen.chat.no_key"),
                         left + PAD, top + PANEL_H - INPUT_H - PAD - 11, FAIL);
             }
         }
@@ -739,7 +1511,7 @@ public final class NumenScreen extends Screen {
         // a parchment field background + border behind each before it renders its text.
         for (AbstractWidget w : overlay) {
             if (w instanceof EditBox eb) {                          // parchment frame, inflated past the inset text
-                GuiCompat.blitSprite(g,
+                GuiCompat.blitSprite(g, 
                         FIELD_SPRITE, eb.getX() - FIELD_INSET_X, eb.getY() - FIELD_INSET_Y,
                         eb.getWidth() + FIELD_INSET_X * 2, eb.getHeight() + FIELD_INSET_Y * 2);
             }
@@ -748,7 +1520,7 @@ public final class NumenScreen extends Screen {
             w.render(g, mouseX, mouseY, partial);
         }
         // Base URL / Proxy placeholders, drawn shadowless by us (the EditBox hint renders with a shadow).
-        if (tab == Tab.SETTINGS) {
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.LLM) {
             String urlPh = addingSite ? "https://… (OpenAI-compatible)"
                     : LlmProviders.byId(providerDropdown.selectedId()).defaultBaseUrl();
             placeholder(g, baseUrlInput, urlPh);
@@ -759,10 +1531,18 @@ public final class NumenScreen extends Screen {
                     : LlmProviders.byId(providerDropdown.selectedId()).defaultModel());
             if (addingSite) placeholder(g, siteNameInput, "e.g. My Proxy");
         }
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.MCP && addingMcp) {
+            placeholder(g, mcpNameInput, "kfc");
+            placeholder(g, mcpTargetInput, mcpStdio ? "cmd /c npx -y <server>" : "https://mcp.mcd.cn");
+            placeholder(g, mcpHeaderInput, mcpStdio ? "KEY=value; KEY2=value2" : "Authorization: Bearer <token>");
+        }
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PERSONA && addingPersona) {
+            placeholder(g, personaNameInput, "雷");   // the text area has its own built-in placeholder
+        }
         // (Chat-input placeholder is the FlatEditBox hint now — drawn shadowless and under the
         // caret in the widget pass, so it can't paint over the caret like a screen-side draw did.)
         // The provider dropdown's open list must sit above even the fields.
-        if (tab == Tab.SETTINGS) {
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.LLM) {
             // render the non-open one first so the open list draws on top
             if (modelDropdown != null && providerDropdown != null && providerDropdown.isOpen()) {
                 modelDropdown.render(g, font, mouseX, mouseY);
@@ -771,6 +1551,16 @@ public final class NumenScreen extends Screen {
                 if (providerDropdown != null) providerDropdown.render(g, font, mouseX, mouseY);
                 if (modelDropdown != null) modelDropdown.render(g, font, mouseX, mouseY);
             }
+        }
+
+        // Summon persona dropdown — drawn late so its open list sits above the summon field.
+        if (summoning && summonPersonaDropdown != null) {
+            summonPersonaDropdown.render(g, font, mouseX, mouseY);
+        }
+
+        // Hovered MCP / skill row tooltip — drawn last so nothing paints over it.
+        if (pendingTip != null) {
+            g.renderComponentTooltip(font, pendingTip, pendingTipX, pendingTipY);
         }
     }
 
@@ -790,7 +1580,7 @@ public final class NumenScreen extends Screen {
             NumenRoster.Entry e = entries.get(i);
             boolean active = e.uuid().equals(uuid);
             // textured socket behind the head (gold-bordered when active), then the avatar, then a status LED
-            GuiCompat.blitSprite(g,active ? AVATAR_FRAME_ACTIVE : AVATAR_FRAME, ax - 2, ay - 2, RAIL_AV + 4, RAIL_AV + 4);
+            GuiCompat.blitSprite(g, active ? AVATAR_FRAME_ACTIVE : AVATAR_FRAME, ax - 2, ay - 2, RAIL_AV + 4, RAIL_AV + 4);
             PlayerFaceRenderer.draw(g, skinFor(e.uuid()), ax, ay, RAIL_AV);
             if (ClientDeaths.isDead(e.uuid())) {                      // dead — dim veil + respawn countdown
                 g.fill(ax, ay, ax + RAIL_AV, ay + RAIL_AV, 0xB0101010);
@@ -822,13 +1612,13 @@ public final class NumenScreen extends Screen {
         int cx = ax + RAIL_AV / 2;
         if (railScroll > 0) chevron(g, cx, top + 1, true);
         if (railScroll < maxRailScroll()) chevron(g, cx, py - 9, false);
-        GuiCompat.blitSprite(g,summoning ? SUMMON_ACTIVE : SUMMON_SPRITE, ax, py, RAIL_AV, RAIL_AV);
+        GuiCompat.blitSprite(g, summoning ? SUMMON_ACTIVE : SUMMON_SPRITE, ax, py, RAIL_AV, RAIL_AV);
     }
 
     /** Scroll-affordance chevron sprite (amber pixel-art triangle, up = more above / down = more below).
      *  Blitted at its native 11×6 so the pixels stay crisp (no scaling, no AA). */
     private void chevron(GuiGraphics g, int cx, int y, boolean up) {
-        GuiCompat.blitSprite(g,
+        GuiCompat.blitSprite(g, 
                 up ? CHEVRON_UP : CHEVRON_DOWN, cx - 5, y, 11, 6);
     }
 
@@ -910,12 +1700,12 @@ public final class NumenScreen extends Screen {
     }
 
     private void emptyHint(GuiGraphics g) {
-        txt(g, Component.literal("No companions. Click + to summon one."),
+        txt(g, Component.translatable("numen.empty.no_companions"),
                 left + PAD, top + HEADER_H + 10, TXT_FAINT);
     }
 
     private void renderTabs(GuiGraphics g, int mouseX, int mouseY) {
-        String[] labels = {"Chat", "Items", "Settings"};
+        String[] labels = tabLabels();
         for (int i = 0; i < 3; i++) {
             boolean active = tab == Tab.values()[i];
             boolean hover = mouseX >= tabX[i] && mouseX < tabX[i] + tabW[i]
@@ -940,10 +1730,10 @@ public final class NumenScreen extends Screen {
         int units = Math.max(1, (int) Math.ceil(max / 2f));
         for (int i = 0; i < units; i++) {
             int ix = x + i * ICON_STEP;
-            GuiCompat.blitSprite(g,empty, ix, y, ICON, ICON);
+            GuiCompat.blitSprite(g, empty, ix, y, ICON, ICON);
             float v = value - i * 2f;
-            if (v >= 2f)      GuiCompat.blitSprite(g,full, ix, y, ICON, ICON);
-            else if (v >= 1f) GuiCompat.blitSprite(g,half, ix, y, ICON, ICON);
+            if (v >= 2f)      GuiCompat.blitSprite(g, full, ix, y, ICON, ICON);
+            else if (v >= 1f) GuiCompat.blitSprite(g, half, ix, y, ICON, ICON);
         }
     }
 
@@ -954,7 +1744,6 @@ public final class NumenScreen extends Screen {
         GuiCompat.blitSprite(g, SLOT_ALT, x, y, w, h);
         if (e == null) return;
         int scale = (int) (h * 0.45f);
-        // 1.20.1: anchor-point form — (posX, posY, scale, relMouseX, relMouseY, entity). Anchor at the
         // box's bottom-centre; the relative mouse offsets make the portrait track the cursor.
         int posX = x + w / 2;
         int posY = y + h - 4;
@@ -964,7 +1753,7 @@ public final class NumenScreen extends Screen {
     }
 
     private void slotBg(GuiGraphics g, net.minecraft.resources.ResourceLocation sprite, int x, int y) {
-        GuiCompat.blitSprite(g,sprite, x, y, 16, 16);
+        GuiCompat.blitSprite(g, sprite, x, y, 16, 16);
     }
 
     private void stackOn(GuiGraphics g, ItemStack st, int x, int y, int mouseX, int mouseY) {
@@ -1001,7 +1790,7 @@ public final class NumenScreen extends Screen {
         int contentH = rows.size() * LINE_H;
         lastMaxScroll = Math.max(0, contentH - viewH);
         if (pinBottom) scroll = lastMaxScroll;
-        scroll = Mth.clamp(scroll, 0, lastMaxScroll);
+        scroll = Mth.clamp((int) scroll, 0, lastMaxScroll);
 
         g.enableScissor(transX, bodyY, transX + transW, bodyBottom);
         int y = bodyY - scroll;
@@ -1033,8 +1822,8 @@ public final class NumenScreen extends Screen {
             int thumbH = Math.max(12, trackH * viewH / (viewH + lastMaxScroll));
             int thumbY = bodyY + (trackH - thumbH) * scroll / lastMaxScroll;
             int sbX = transX + transW - 4;
-            GuiCompat.blitSprite(g,SCROLL_TRACK, sbX, bodyY, 4, viewH);
-            GuiCompat.blitSprite(g,SCROLL_THUMB, sbX, thumbY, 4, thumbH);
+            GuiCompat.blitSprite(g, SCROLL_TRACK, sbX, bodyY, 4, viewH);
+            GuiCompat.blitSprite(g, SCROLL_THUMB, sbX, thumbY, 4, thumbH);
         }
     }
 
@@ -1048,25 +1837,29 @@ public final class NumenScreen extends Screen {
         // The PHYSICAL transcript, not the LLM context: compaction rewires what
         // the model sees but must never eat the owner's visible history.
         for (ConvoState.Msg msg : loop().display()) {
-            // Java 17: instanceof chain in place of a Java 21 sealed pattern switch.
             if (msg instanceof ConvoState.Msg.User u) {
-                flushTools(out, group, done, failed, width);
-                if (ConvoLog.COMPACT_DIVIDER.equals(u.content())) {
-                    wrapPlain(out, "─── 更早的对话已压缩为摘要（原文保留在磁盘） ───",
-                            TXT_FAINT, width);
-                    continue;
-                }
-                wrapPlain(out, u.content(), YOU, width);     // user = teal body, no label
+                    flushTools(out, group, done, failed, width);
+                    if (ConvoLog.PERSONA_DIVIDER.equals(u.content())) {
+                        wrapPlain(out, I18n.get("numen.chat.persona_changed"), TXT_FAINT, width);
+                        continue;
+                    }
+                    if (ConvoLog.COMPACT_DIVIDER.equals(u.content())) {
+                        wrapPlain(out, I18n.get("numen.chat.compacted"), TXT_FAINT, width);
+                        continue;
+                    }
+                    String shown = ownerText(u.content());       // show only the owner's words, not injected content
+                    if (shown.isEmpty()) continue;               // a pure directive/injected message → not shown
+                    wrapPlain(out, shown, YOU, width);           // user = teal body, no label
             } else if (msg instanceof ConvoState.Msg.Assistant a) {
-                AssistantTurn turn = a.turn();
-                if (turn.content() != null && !turn.content().isBlank()) {
-                    flushTools(out, group, done, failed, width);   // spoken reply breaks the fold
-                    addHeader(out, name, AI, width);         // bold name header on its OWN line
-                    wrapPlain(out, turn.content(), AI, width);
-                }
-                group.addAll(turn.toolCalls());
+                    AssistantTurn turn = a.turn();
+                    if (turn.content() != null && !turn.content().isBlank()) {
+                        flushTools(out, group, done, failed, width);   // spoken reply breaks the fold
+                        addHeader(out, name, AI, width);         // bold name header on its OWN line
+                        wrapPlain(out, turn.content(), AI, width);
+                    }
+                    group.addAll(turn.toolCalls());
             } else if (msg instanceof ConvoState.Msg.Tool) {
-                /* result drives done/fail, not a row */
+                    /* result drives done/fail, not a row */
             }
         }
         flushTools(out, group, done, failed, width);
@@ -1074,13 +1867,15 @@ public final class NumenScreen extends Screen {
         // mid-task, or pushed in by an external bridge via NumenGateway) —
         // visible immediately so a queued message never feels swallowed.
         for (String queued : loop().queuedPrompts()) {
-            wrapPlain(out, "⌛ " + queued, TXT_FAINT, width);
+            String shown = ownerText(queued);       // injected events (persona-change / <event>) → empty → not shown
+            if (shown.isEmpty()) continue;
+            wrapPlain(out, "⌛ " + shown, TXT_FAINT, width);
         }
         if (loop().isCompacting()) {
-            wrapPlain(out, "compacting history…", TXT_MUTED, width);
+            wrapPlain(out, I18n.get("numen.chat.compacting"), TXT_MUTED, width);
         }
         if (out.isEmpty()) {
-            wrapPlain(out, "Say something to " + name + ".", TXT_FAINT, width);
+            wrapPlain(out, I18n.get("numen.chat.empty", name), TXT_FAINT, width);
         }
         return out;
     }
@@ -1103,12 +1898,12 @@ public final class NumenScreen extends Screen {
             List<String> names = new ArrayList<>();
             for (LlmToolCall tc : group) if (!names.contains(tc.name())) names.add(tc.name());
             boolean anyFail = group.stream().anyMatch(tc -> failed.contains(tc.id()));
-            String summary = "▸ " + group.size() + " steps · " + String.join(" · ", names);
+            String summary = "▸ " + I18n.get("numen.chat.steps", group.size()) + " · " + String.join(" · ", names);
             out.add(new Row(colored(fitOneLine(summary, width - 2), anyFail ? FAIL : TOOL).getVisualOrderText(),
                     anyFail ? FAIL : TOOL, null, key));
         } else {
             if (!running) {                                       // manually expanded → collapsible header
-                String hdr = "▾ " + group.size() + " steps";
+                String hdr = "▾ " + I18n.get("numen.chat.steps", group.size());
                 out.add(new Row(colored(hdr, TXT_MUTED).getVisualOrderText(), TXT_MUTED, null, key));
             }
             for (LlmToolCall tc : group) addToolRow(out, tc, width);
@@ -1174,11 +1969,11 @@ public final class NumenScreen extends Screen {
 
     /** Right-side PLAN panel: the companion's latest {@code todowrite}, with status glyphs. */
     private void renderPlan(GuiGraphics g, int x, int y, int bottom) {
-        txt(g, Component.literal("PLAN"), x, y, TXT_MUTED);
+        txt(g, Component.translatable("numen.chat.plan"), x, y, TXT_MUTED);
         int ly = y + 13;
         JsonArray todos = latestPlan();
         if (todos == null || todos.isEmpty()) {
-            txt(g, Component.literal("no plan yet"), x, ly, TXT_FAINT);
+            txt(g, Component.translatable("numen.chat.no_plan"), x, ly, TXT_FAINT);
             return;
         }
         for (int i = 0; i < todos.size() && ly + LINE_H < bottom; i++) {
@@ -1277,11 +2072,11 @@ public final class NumenScreen extends Screen {
         // -- RIGHT bottom: checkerboard 3×9 storage + hotbar --
         int storeY = cTop + 74;
         if (snap == null) {
-            txt(g, Component.literal("loading…"), rightX, storeY + 4, TXT_FAINT);
+            txt(g, Component.translatable("numen.status.loading"), rightX, storeY + 4, TXT_FAINT);
             return;
         }
         if (!snap.loaded() || snap.items().isEmpty()) {
-            txt(g, Component.literal("asleep — chat to wake it."), rightX, storeY + 4, TXT_FAINT);
+            txt(g, Component.translatable("numen.status.asleep"), rightX, storeY + 4, TXT_FAINT);
             return;
         }
         List<ItemStack> items = snap.items();

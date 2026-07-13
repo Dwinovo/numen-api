@@ -59,6 +59,8 @@ public final class NumenLlmClient {
     private final String fullUrl;
     private final String apiKey;
     private final String model;
+    /** Reasoning effort: {@code auto} (send nothing) | {@code low} | {@code medium} | {@code high}. */
+    private final String reasoningEffort;
 
     private NumenLlmClient(INumenConfig config) {
         this.provider = pickProvider(config.getProvider());
@@ -69,6 +71,7 @@ public final class NumenLlmClient {
                 com.dwinovo.numen.agent.model.ModelRegistry.headers(config.getProvider()));
         String configured = config.getModel();
         this.model = (configured == null || configured.isBlank()) ? "gpt-5.4-mini" : configured;
+        this.reasoningEffort = normalizeReasoning(config.getReasoningEffort());
         Constants.LOG.info("[numen-llm] client initialised: provider={}, model={}, url={}, streaming={}",
                 provider.name(), model, fullUrl, provider.supportsStreaming());
     }
@@ -151,7 +154,6 @@ public final class NumenLlmClient {
         // -- 1. Build wire-format messages and tool list via provider.
         List<JsonObject> wire = new ArrayList<>(messages.size());
         for (ConvoState.Msg m : messages) {
-            // Java 17: instanceof chain in place of a Java 21 sealed pattern switch.
             if (m instanceof ConvoState.Msg.User u) {
                 wire.add(provider.buildUserMessage(u.content()));
             } else if (m instanceof ConvoState.Msg.Assistant a) {
@@ -162,6 +164,12 @@ public final class NumenLlmClient {
         }
         JsonArray toolList = provider.buildToolList(tools);
         JsonObject body = provider.buildRequestBody(model, systemPrompt, wire, toolList);
+
+        // -- 1b. Reasoning / deep-thinking: only when the user opted in (never on "auto"), so a
+        //        non-reasoning model is never handed an unexpected parameter it would 400 on.
+        if (!"auto".equals(reasoningEffort)) {
+            provider.applyReasoning(body, reasoningEffort);
+        }
 
         // -- 2. Enable streaming + usage reporting (both server-side flags).
         body.addProperty("stream", true);
@@ -218,6 +226,15 @@ public final class NumenLlmClient {
     }
 
     private static boolean nonBlank(String s) { return s != null && !s.isBlank(); }
+
+    /** Coerce a stored reasoning value to auto/low/medium/high ("auto" = don't send the parameter). */
+    private static String normalizeReasoning(String v) {
+        if (v == null) return "auto";
+        return switch (v.trim().toLowerCase()) {
+            case "low", "medium", "high" -> v.trim().toLowerCase();
+            default -> "auto";
+        };
+    }
 
     private static int jsonInt(JsonObject o, String key) {
         if (o == null || !o.has(key) || o.get(key).isJsonNull()) return 0;

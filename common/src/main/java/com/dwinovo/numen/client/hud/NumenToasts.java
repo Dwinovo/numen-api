@@ -182,7 +182,7 @@ public final class NumenToasts {
 
     private static void drawAvatar(GuiGraphics g, UUID uuid, int x, int y, UiTheme th) {
         // textured socket behind the head (same sprite as the panel rail), face on top covering the centre
-        GuiCompat.blitSprite(g,
+        GuiCompat.blitSprite(g, 
                 AVATAR_FRAME, x - 2, y - 2, AVATAR + 4, AVATAR + 4);
         PlayerFaceRenderer.draw(g, skinFor(uuid), x, y, AVATAR);
     }
