@@ -9,6 +9,7 @@ import com.dwinovo.numen.agent.provider.LlmToolCall;
 import com.dwinovo.numen.agent.skill.SkillRegistry;
 import com.dwinovo.numen.agent.tool.ToolInvocation;
 import com.dwinovo.numen.agent.tool.ToolRegistry;
+import com.dwinovo.numen.data.ModLanguageData;
 import com.dwinovo.numen.platform.Services;
 import com.dwinovo.numen.platform.services.INumenConfig;
 import com.dwinovo.numen.task.TaskResult;
@@ -16,6 +17,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.resources.language.I18n;
 
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -144,8 +146,19 @@ public final class EntityAgentLoop {
     private String personaName;
     private String personaId;   // library id this persona came from (so a library edit can propagate here)
 
+    /**
+     * The {@link com.dwinovo.numen.agent.llm.ProviderLibrary} entry this companion
+     * talks through, or null = the global settings. Resolved to a concrete endpoint
+     * FRESH at every dispatch (entry edits and deletions take effect on the next
+     * request, deletion degrading gracefully to global). Persisted as an assignment
+     * in {@code providers.json}, restored in the constructor.
+     */
+    private String providerEntryId;
+
     private boolean awaitingLlmResponse = false;
     private boolean aborted = false;
+    /** One turn-level re-run per failure has been spent (reset when a response lands). */
+    private boolean turnRetried = false;
 
     /**
      * Set while an external driver (an MCP client / Claude) holds this body via
@@ -213,6 +226,7 @@ public final class EntityAgentLoop {
             display.add(msg);
         });
         this.workBlocks = WorkBlockMemory.forEntity(numenRoot.resolve("memory"), entityUuid);
+        this.providerEntryId = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().assignedEntry(entityUuid);
         this.dispatcher = new ToolDispatcher(entityUuid, new ToolDispatcher.Sink() {
             @Override public void onResult(ToolInvocation inv, String resultJson) {
                 harvestWorkBlocks(inv.name(), resultJson);
@@ -564,6 +578,46 @@ public final class EntityAgentLoop {
         return personaId;
     }
 
+    // ---- per-companion LLM provider ----
+
+    /** The client for THIS companion: its provider-library entry resolved fresh
+     *  (blank fields → global), or plain global when nothing is assigned. */
+    private NumenLlmClient client() {
+        return NumenLlmClient.forEndpoint(
+                com.dwinovo.numen.agent.llm.ProviderLibrary.instance().resolve(providerEntryId));
+    }
+
+    /** The provider-library entry id this companion talks through, or null (= global). */
+    public String providerEntryId() {
+        return providerEntryId;
+    }
+
+    /**
+     * Why this companion CAN'T talk right now, in player-facing words — or null when
+     * its endpoint is usable. The no-crash safety net for a companion that somehow
+     * exists without a provider binding (legacy, bugs): sending a message surfaces
+     * this instead of a silent stall.
+     */
+    public String endpointProblem() {
+        var lib = com.dwinovo.numen.agent.llm.ProviderLibrary.instance();
+        if (providerEntryId == null || lib.get(providerEntryId) == null) {
+            return I18n.get(ModLanguageData.Keys.ENDPOINT_UNBOUND);
+        }
+        if (!lib.resolve(providerEntryId).hasApiKey()) {
+            return I18n.get(ModLanguageData.Keys.ENDPOINT_NO_KEY, lib.get(providerEntryId).name());
+        }
+        return null;
+    }
+
+    /** Point this companion at a provider-library entry (null = back to global settings)
+     *  and persist the assignment. Takes effect on the next request — no restart. */
+    public void setProviderEntry(String entryId) {
+        this.providerEntryId = entryId == null || entryId.isBlank() ? null : entryId;
+        com.dwinovo.numen.agent.llm.ProviderLibrary.instance().assign(entityUuid, this.providerEntryId);
+        Constants.LOG.info("[numen-entity#{}] provider entry set to {}", entityUuid,
+                this.providerEntryId == null ? "(global)" : this.providerEntryId);
+    }
+
     /**
      * Switch this companion's persona at runtime. Three things happen:
      * (1) the persona text/name update, so the next turn's system prompt recomposes with the new
@@ -651,9 +705,12 @@ public final class EntityAgentLoop {
         // legitimately chains many tasks, and resuming a timed-out move_to
         // repeats the exact same call. Runaways are stopped by the owner's
         // interrupt.
-        if (!NumenLlmClient.isConfigured()) {
-            Constants.LOG.warn("[numen-entity#{}] API key not set; open the Numen GUI (X) → Settings",
-                    entityUuid);
+        // Endpoint check against THIS companion's selected provider entry — error-driven
+        // guidance, no fallback, no crash: a missing binding or keyless entry says
+        // exactly what to do (same words the chat screen shows via endpointProblem()).
+        String problem = endpointProblem();
+        if (problem != null) {
+            Constants.LOG.warn("[numen-entity#{}] can't start turn: {}", entityUuid, problem);
             aborted = true;
             return;
         }
@@ -693,7 +750,7 @@ public final class EntityAgentLoop {
         // Capture the current generation; if the owner interrupts before this
         // call resolves, handleResponse sees the mismatch and discards it.
         final int gen = turnGeneration;
-        NumenLlmClient.instance().chatStreaming(snapshot, tools, systemPrompt, null)
+        client().chatStreaming(snapshot, tools, systemPrompt, null)
                 .whenComplete((res, err) -> bounceBackToMain(gen, res, err));
     }
 
@@ -727,7 +784,7 @@ public final class EntityAgentLoop {
                 entityUuid, auto ? "auto" : "manual", request.size() - 1);
         final int gen = turnGeneration;
         final long startMs = System.currentTimeMillis();
-        NumenLlmClient.instance().chatStreaming(request, List.of(), COMPACT_SYSTEM_PROMPT, null)
+        client().chatStreaming(request, List.of(), COMPACT_SYSTEM_PROMPT, null)
                 .whenComplete((res, err) -> Minecraft.getInstance().execute(
                         () -> finishCompaction(gen, auto, startMs, res, err)));
     }
@@ -874,11 +931,13 @@ public final class EntityAgentLoop {
     }
 
     private String composeSystemPrompt() {
-        // Per-companion persona wins; fall back to the global default. Read fresh each turn so a live
-        // persona switch takes effect next turn with no in-flight interruption.
+        // Per-companion persona wins; fall back to the global default; with neither,
+        // the persona slot says so EXPLICITLY — an unconfigured persona is a valid
+        // state (自由发挥), not a missing one. Read fresh each turn so a live persona
+        // switch takes effect next turn with no in-flight interruption.
         String base = (personaText != null && !personaText.isBlank())
                 ? personaText : Services.CONFIG.getSystemPrompt();
-        if (base == null) base = "";
+        if (base == null || base.isBlank()) base = "未配置人设,可以自由发挥。";
         String envBlock = buildEnvBlock();
         AbstractClientPlayer body = resolveEntity();
         String knownBlocks = workBlocks.formatXml(body != null ? body.level() : null);
@@ -887,7 +946,7 @@ public final class EntityAgentLoop {
         StringBuilder sb = new StringBuilder();
         // Persona = the mutable "who you are" layer, wrapped so it's clearly delimited from the
         // immutable operating core (ENTITY_PROMPT) that follows.
-        if (!base.isBlank()) sb.append("<persona>\n").append(base.strip()).append("\n</persona>");
+        sb.append("<persona>\n").append(base.strip()).append("\n</persona>");
         sb.append(ENTITY_PROMPT);
         if (envBlock != null) {
             sb.append("\n\n").append(envBlock);
@@ -921,6 +980,30 @@ public final class EntityAgentLoop {
         return ClientNumenLookup.resolve(entityUuid);
     }
 
+    /**
+     * A turn died on a SYSTEM failure (network error / null response). Queued owner
+     * prompts are pending intent and must not be held hostage by the dead turn — a
+     * REPL that errors returns to idle and drains its command queue; same here: if
+     * prompts are waiting, start a fresh turn carrying them. Only an OWNER interrupt
+     * holds the queue (Stop means stop). With no prompts queued, latch {@code aborted}
+     * as before (the next prompt or event resumes).
+     */
+    private void failTurnKeepQueue() {
+        if (bufferedPrompts.isEmpty()) {
+            aborted = true;
+            return;
+        }
+        // The failed turn may have left the conversation ending on a user message
+        // (its prompts were flushed before dispatch). Cap it so the fresh turn's
+        // flush doesn't create back-to-back user messages (some backends 400 those).
+        if (convo.lastMessage() instanceof ConvoState.Msg.User) {
+            convo.addAssistant(new AssistantTurn("(连接中断)", List.of(), null));
+        }
+        Constants.LOG.info("[numen-entity#{}] turn failed with {} queued prompt(s) — starting a fresh turn with them",
+                entityUuid, bufferedPrompts.size());
+        tryStartTurn();
+    }
+
     private void bounceBackToMain(int gen, NumenLlmClient.ChatResult res, Throwable err) {
         Minecraft mc = Minecraft.getInstance();
         mc.execute(() -> handleResponse(gen, res, err));
@@ -949,12 +1032,28 @@ public final class EntityAgentLoop {
         if (err != null) {
             Constants.LOG.warn("[numen-entity#{}] LLM call failed: {}",
                     entityUuid, unwrap(err));
-            aborted = true;
+            // MID-STREAM deaths (idle watchdog, connection reset after first tokens) are
+            // outside the transport's retry scope — the SDKs surface them to the caller,
+            // and the caller's standard answer is: discard the partial (never entered the
+            // conversation) and re-run the whole turn. One turn-level retry, immediate;
+            // the transport already backed off its own classes.
+            if (!turnRetried) {
+                turnRetried = true;
+                Constants.LOG.info("[numen-entity#{}] re-running failed turn once", entityUuid);
+                awaitingLlmResponse = true;
+                final int gen2 = turnGeneration;
+                client().chatStreaming(convo.snapshot(), ToolRegistry.all(),
+                                composeSystemPrompt(), null)
+                        .whenComplete((r2, e2) -> bounceBackToMain(gen2, r2, e2));
+                return;
+            }
+            failTurnKeepQueue();
             return;
         }
+        turnRetried = false;   // a response landed — the next failure gets a fresh retry
         if (res == null || res.turn() == null) {
             Constants.LOG.warn("[numen-entity#{}] LLM returned null turn", entityUuid);
-            aborted = true;
+            failTurnKeepQueue();
             return;
         }
         AssistantTurn turn = res.turn();

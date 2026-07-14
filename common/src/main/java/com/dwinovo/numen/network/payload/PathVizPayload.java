@@ -13,9 +13,10 @@ import java.util.UUID;
 
 /**
  * Server → Client: the companion's current pathfinding plan, for the in-world
- * path overlay (Baritone's {@code PathRenderer}, ported to our server-authored
- * model). The body pushes it to the owner whenever it (re)plans a segment, and
- * pushes an EMPTY one (all lists empty) to clear the overlay when the path ends.
+ * path overlay. The path is computed and owned on the server (the client has
+ * no planner state of its own to render from), so the body pushes the plan to
+ * the owner whenever it (re)plans a segment, and pushes an EMPTY one (all
+ * lists empty) to clear the overlay when the path ends.
  *
  * <ul>
  *   <li>{@code nodes} — the path positions (feet cells); drawn as a red poly-line.</li>

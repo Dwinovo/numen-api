@@ -18,7 +18,7 @@ import java.util.UUID;
  * to the player list (→ chunk loading for free) and to the level, but does NOT
  * load a hand-built fake player's {@code .dat} (that path is tied to the real
  * login flow) — so {@link #spawn} restores position / inventory / owner from disk
- * explicitly afterwards, the way Carpet's {@code EntityPlayerMPFake} does.
+ * explicitly afterwards.
  * {@link net.minecraft.server.players.PlayerList#remove} saves that data back and
  * removes the body — so despawn is a clean, persisted dormancy.
  */
@@ -40,7 +40,7 @@ public final class CompanionFactory {
         // 1.20.1: placeNewPlayer is 2-arg (no CommonListenerCookie — pre-configuration-phase).
         server.getPlayerList().placeNewPlayer(connection, player);
         // placeNewPlayer does NOT load a hand-built fake player's .dat, so restore
-        // it ourselves (Carpet's model): position, inventory, health, owner from
+        // it ourselves: position, inventory, health, owner from
         // disk. Without this a respawned companion spawns at 0,0,0 with no items.
         loadPlayerData(server, player);
         // Companions are always survival, whatever the world's default game type — their whole design
@@ -64,8 +64,8 @@ public final class CompanionFactory {
      * Restore a fake player's saved state from its playerdata {@code .dat}
      * ({@link net.minecraft.server.players.PlayerList#loadPlayerData} +
      * {@link net.minecraft.world.entity.Entity#load}). {@code placeNewPlayer}
-     * skips this for hand-constructed players, so we do it like Carpet's
-     * {@code loadPlayerData}. No-op on first summon (no file yet).
+     * skips this for hand-constructed players, so we invoke the same load
+     * ourselves. No-op on first summon (no file yet).
      */
     private static void loadPlayerData(MinecraftServer server, NumenPlayer player) {
         // 1.20.4: PlayerList.load(player) returns a nullable CompoundTag (predates both the

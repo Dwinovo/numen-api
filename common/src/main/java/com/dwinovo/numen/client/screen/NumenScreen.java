@@ -12,6 +12,7 @@ import com.dwinovo.numen.client.agent.ClientNumenLookup;
 import com.dwinovo.numen.client.agent.EntityAgentLoop;
 import com.dwinovo.numen.client.agent.NumenRoster;
 import com.dwinovo.numen.client.data.ClientNumenInventory;
+import com.dwinovo.numen.data.ModLanguageData;
 import com.dwinovo.numen.network.payload.RequestInventoryPayload;
 import com.dwinovo.numen.persona.PersonaLibrary;
 import com.dwinovo.numen.platform.Services;
@@ -122,8 +123,23 @@ public final class NumenScreen extends Screen {
     private Tab tab = Tab.CHAT;
 
     /** The Settings tab is a config hub: a left sub-nav picks one of these sections. */
-    private enum SettingsSection { LLM, MCP, SKILLS, PERSONA }
-    private SettingsSection settingsSection = SettingsSection.LLM;
+    private enum SettingsSection { PROVIDER, PROXY, MCP, SKILLS, PERSONA }
+
+    // ---- model-config section state (mirrors the persona section) ----
+    private boolean addingProvider;
+    private String providerEditId;
+    private String providerDeletePending;
+    private String wProvName = "", wProvProvider = "", wProvModel = "", wProvKey = "", wProvBaseUrl = "";
+    private net.minecraft.client.gui.components.EditBox provNameInput,
+            provModelInput, provKeyInput, provBaseUrlInput;
+    /** Form pickers: the provider catalog + the picked provider's model list. */
+    private ProviderDropdown provProviderDropdown;
+    private Dropdown provModelDropdown;
+    private boolean provCustomModel;
+
+    // ---- proxy section state (a dedicated tab: IP + port) ----
+    private net.minecraft.client.gui.components.EditBox proxyIpInput, proxyPortInput;
+    private SettingsSection settingsSection = SettingsSection.PROVIDER;
 
     // Persona library form state (mirrors the MCP add/edit/delete flow).
     private boolean addingPersona;
@@ -135,6 +151,9 @@ public final class NumenScreen extends Screen {
     /** Persona chosen for the companion currently being summoned (null = default / none). */
     private String summonPersonaId;
     private Dropdown summonPersonaDropdown;
+    /** Provider entry for the new companion — REQUIRED (no default, no fallback). */
+    private Dropdown summonProviderDropdown;
+    private String summonProviderId;
     private static final String PERSONA_DEFAULT = "__default__";
     private int settingsScroll;   // first visible row of the MCP / skill list (wheel-scroll when long)
 
@@ -174,6 +193,9 @@ public final class NumenScreen extends Screen {
     private EditBox baseUrlInput;
     private long savedFlashUntil;
     private long warnUntil;        // transient "no API key" hint on the chat tab
+    /** The current warn hint's text (endpoint problems vary: unbound provider vs keyless
+     *  entry); null falls back to the generic no-key translation. */
+    private String warnText;
 
     // A hovered-row tooltip (MCP / skill list) collected during section render, drawn last so
     // it sits above every later draw. Cleared each frame.
@@ -275,9 +297,14 @@ public final class NumenScreen extends Screen {
         mcpNameInput = mcpTargetInput = mcpHeaderInput = null;
         personaNameInput = null;
         personaTextArea = null;
+        provNameInput = provModelInput = provKeyInput = provBaseUrlInput = null;
+        provProviderDropdown = null;
+        provModelDropdown = null;
+        proxyIpInput = proxyPortInput = null;
         modelDropdown = null;
         summonInput = null;
         summonPersonaDropdown = null;
+        summonProviderDropdown = null;
         if (summoning) { buildSummonField(); return; }
         if (dismissPending != null) { buildDismissConfirm(); return; }
         switch (tab) {
@@ -287,24 +314,50 @@ public final class NumenScreen extends Screen {
         }
     }
 
+    /** Row layout (offsets from top+HEADER_H) — each control gets its own label row,
+     *  drawn in the render pass at these SAME offsets (keep the two in lockstep):
+     *  8 title · 24 名字 label · 34 name field · 58 人设 label · 68 persona dropdown ·
+     *  92 模型配置 label · 102 provider dropdown · 128 buttons · 152 hint/warn. */
     private void buildSummonField() {
-        int y = top + HEADER_H + 24;
-        summonInput = new FlatEditBox(font, left + PAD + FIELD_INSET_X, y + FIELD_INSET_Y,
+        int y0 = top + HEADER_H;
+        summonInput = new FlatEditBox(font, left + PAD + FIELD_INSET_X, y0 + 34 + FIELD_INSET_Y,
                 PANEL_W - PAD * 2 - FIELD_INSET_X * 2, 18 - FIELD_INSET_Y * 2, Component.literal(""));
         summonInput.setMaxLength(com.dwinovo.numen.network.payload.SummonRequestPayload.MAX_NAME);
         summonInput.setBordered(false);
         summonInput.setTextColor(TXT);
-        summonInput.setHint(Component.translatable("numen.summon.name_hint"));
         add(summonInput);
-        // Optional persona for the new companion — a dropdown of the library (+ 默认). Rendered/routed
-        // manually (see render / mouseClicked), like the Settings model dropdown.
+        // Persona is OPTIONAL: first item = 不配置 (the persona slot then tells the
+        // model "未配置人设,可以自由发挥"), presets and user personas follow. The name
+        // "hint" renders in the render pass as a FAINT placeholder — the EditBox's
+        // own hint drew in full text color and read as typed input.
         List<Dropdown.Item> items = new ArrayList<>();
-        items.add(new Dropdown.Item(PERSONA_DEFAULT, I18n.get("numen.persona.default")));
+        items.add(new Dropdown.Item(PERSONA_DEFAULT, I18n.get(ModLanguageData.Keys.SUMMON_PERSONA_NONE)));
         for (PersonaLibrary.Persona p : PersonaLibrary.instance().list()) {
             items.add(new Dropdown.Item(p.id(), p.name()));
         }
         summonPersonaDropdown = new Dropdown(items, summonPersonaId == null ? PERSONA_DEFAULT : summonPersonaId);
-        summonPersonaDropdown.setBounds(left + PAD, y + 26, PANEL_W - PAD * 2, 18);
+        summonPersonaDropdown.setBounds(left + PAD, y0 + 68, PANEL_W - PAD * 2, 18);
+        // REQUIRED model config — no default item and no fallback: an empty library
+        // shows no dropdown; clicking 创建 then explains (doSummon).
+        var provEntries = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list();
+        if (!provEntries.isEmpty()) {
+            List<Dropdown.Item> provItems = new ArrayList<>();
+            for (var e : provEntries) {
+                provItems.add(new Dropdown.Item(e.id(), e.name()));
+            }
+            if (summonProviderId == null) summonProviderId = provEntries.get(0).id();
+            summonProviderDropdown = new Dropdown(provItems, summonProviderId);
+            summonProviderDropdown.setBounds(left + PAD, y0 + 102, PANEL_W - PAD * 2, 18);
+        }
+        // Explicit actions — Enter stays as the fallback confirm (keyPressed), the
+        // buttons are the primary path.
+        int bw = 64, gap = 8, totalW = bw * 2 + gap;
+        int bx = left + (PANEL_W - totalW) / 2;
+        add(new SimpleButton(bx, y0 + 128, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { summoning = false; rebuild(); }));
+        add(new SimpleButton(bx + bw + gap, y0 + 128, bw, 18,
+                Component.translatable(ModLanguageData.Keys.SUMMON_CREATE),
+                b -> doSummon()));
         setInitialFocus(summonInput);
     }
 
@@ -464,13 +517,15 @@ public final class NumenScreen extends Screen {
         addingPersona = false;
         personaEditId = null;
         personaDeletePending = null;
+        addingProvider = false;
+        providerEditId = null;
+        providerDeletePending = null;
         rebuild();
     }
 
     /** Dispatch widget building by the active section (skill/MCP lists render manually). */
     private void buildSettingsWidgets() {
         switch (settingsSection) {
-            case LLM -> buildLlmWidgets();
             case SKILLS -> buildSkillsWidgets();
             case MCP -> {
                 if (mcpDeletePending != null) buildMcpDeleteConfirm();
@@ -482,7 +537,162 @@ public final class NumenScreen extends Screen {
                 else if (addingPersona) buildPersonaForm();
                 else buildPersonaListWidgets();
             }
+            case PROVIDER -> {
+                if (providerDeletePending != null) buildProviderDeleteConfirm();
+                else if (addingProvider) buildProviderForm();
+                else buildProviderListWidgets();
+            }
+            case PROXY -> buildProxyWidgets();
         }
+    }
+
+    // ---- Proxy section: the global network proxy, its own tab (IP + port) ----
+
+    private void buildProxyWidgets() {
+        int x = secX(), w = secW();
+        int fy = secY0();
+        String cur = Services.CONFIG.getProxy() == null ? "" : Services.CONFIG.getProxy().trim();
+        String ip = "", port = "";
+        int colon = cur.lastIndexOf(':');
+        if (colon > 0) { ip = cur.substring(0, colon); port = cur.substring(colon + 1); }
+        else ip = cur;
+        // One row below the section title (only two rows here — space is plentiful).
+        proxyIpInput = field(x, fy + 25, w, 64, ip);
+        proxyPortInput = field(x, fy + 25 + SET_SP, w, 8, port);
+        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> {
+                    String i = proxyIpInput.getValue().trim();
+                    String p = proxyPortInput.getValue().trim();
+                    Services.CONFIG.setProxy(i.isEmpty() ? "" : (p.isEmpty() ? i : i + ":" + p));
+                    Services.CONFIG.save();
+                    NumenLlmClient.reset();
+                    savedFlashUntil = System.currentTimeMillis() + 1500;
+                }));
+    }
+
+    private void renderProxySection(GuiGraphics g) {
+        int x = secX();
+        int fy = secY0();
+        txt(g, Component.translatable("numen.settings.proxy"), x, fy - 2, TXT);
+        txt(g, Component.translatable(ModLanguageData.Keys.SETTINGS_PROXY_IP), x, fy + 14, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.SETTINGS_PROXY_PORT), x, fy + 14 + SET_SP, TXT_MUTED);
+        if (savedFlashUntil > System.currentTimeMillis()) {
+            txt(g, Component.translatable("numen.settings.saved"), x, top + PANEL_H - PAD - 14, OK);
+        }
+    }
+
+    // ---- Provider section: the library of named LLM provider configs companions select from ----
+
+    private void buildProviderListWidgets() {
+        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable(ModLanguageData.Keys.PROVIDER_ADD), b -> {
+                    addingProvider = true; providerEditId = null;
+                    wProvName = ""; wProvProvider = ""; wProvModel = ""; wProvKey = ""; wProvBaseUrl = "";
+                    rebuild();
+                }));
+    }
+
+    /**
+     * The model-config form: 名称 → 提供商 (the live provider catalog, reused) →
+     * 模型 + Base URL, both ADAPTIVE to the picked provider (its model list / site
+     * default URL, editable) → API Key. Saving yields a complete config.
+     */
+    private void buildProviderForm() {
+        int x = secX(), w = secW();
+        int fy = secY0();
+        provNameInput = field(x, fy + 11, w, 48, wProvName);
+        // Provider picker — same catalog as everywhere else (built-ins + user sites),
+        // no "+add site" row here. Blank state (fresh form) starts on the first entry
+        // and adapts model/baseUrl to it.
+        if (wProvProvider == null || wProvProvider.isBlank()) {
+            adaptToProvider(LlmProviders.all().isEmpty() ? "" : LlmProviders.all().get(0).id());
+        }
+        provProviderDropdown = new ProviderDropdown(wProvProvider, false);
+        provProviderDropdown.setBounds(x, fy + 11 + SET_SP, w, 18);
+        // Model row: the provider's known models as a dropdown (+ 自定义 → free text),
+        // free text only for custom providers.
+        ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(wProvProvider));
+        boolean providerCustom = mp != null && mp.custom();
+        if (provCustomModel || providerCustom || mp == null || mp.models().isEmpty()) {
+            provModelDropdown = null;
+            provModelInput = field(x, fy + 11 + 2 * SET_SP, providerCustom || mp == null ? w : w - 20, 128, wProvModel);
+            if (!providerCustom && mp != null && !mp.models().isEmpty()) {
+                add(new SimpleButton(x + w - 18, fy + 11 + 2 * SET_SP, 18, 18, Component.literal("▾"),
+                        b -> { preserveProviderForm(); provCustomModel = false; rebuild(); }));
+            }
+        } else {
+            provModelInput = null;
+            boolean known = mp.models().stream().anyMatch(m -> m.id().equals(wProvModel));
+            String sel = known ? wProvModel : mp.models().get(0).id();
+            provModelDropdown = new Dropdown(modelItems(mp), sel);
+            provModelDropdown.setBounds(x, fy + 11 + 2 * SET_SP, w, 18);
+        }
+        provKeyInput = field(x, fy + 11 + 3 * SET_SP, w, 256, wProvKey);
+        provBaseUrlInput = field(x, fy + 11 + 4 * SET_SP, w, 256, wProvBaseUrl);
+        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> onSaveProvider()));
+        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+                Component.literal("✕"), b -> { addingProvider = false; providerEditId = null; rebuild(); }));
+        setInitialFocus(provNameInput);
+    }
+
+    /** Provider changed (or fresh form): adapt model + Base URL to the pick —
+     *  the site's default URL and its first model, both still editable. */
+    private void adaptToProvider(String providerId) {
+        wProvProvider = providerId;
+        ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(providerId));
+        provCustomModel = mp != null && mp.custom();
+        wProvModel = (mp != null && !mp.models().isEmpty()) ? mp.models().get(0).id() : "";
+        wProvBaseUrl = LlmProviders.byId(providerId).defaultBaseUrl();
+    }
+
+    /** Keep typed values across a rebuild (mirror of the persona/MCP form preserves). */
+    private void preserveProviderForm() {
+        if (provNameInput != null) wProvName = provNameInput.getValue();
+        if (provKeyInput != null) wProvKey = provKeyInput.getValue();
+        if (provBaseUrlInput != null) wProvBaseUrl = provBaseUrlInput.getValue();
+        if (provModelInput != null) wProvModel = provModelInput.getValue();
+        else if (provModelDropdown != null && !CUSTOM_MODEL.equals(provModelDropdown.selectedId())) {
+            wProvModel = provModelDropdown.selectedId();
+        }
+    }
+
+    private void buildProviderDeleteConfirm() {
+        int x = secX();
+        int by = secY0() + 24;
+        int bw = 64, gap = 8;
+        add(new SimpleButton(x, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
+            com.dwinovo.numen.agent.llm.ProviderLibrary.instance().remove(providerDeletePending);
+            providerDeletePending = null;
+            rebuild();
+        }));
+        add(new SimpleButton(x + bw + gap, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { providerDeletePending = null; rebuild(); }));
+    }
+
+    private void onSaveProvider() {
+        String name = provNameInput.getValue().trim();
+        if (name.isEmpty()) { warnUntil = System.currentTimeMillis() + 4000; return; }
+        var lib = com.dwinovo.numen.agent.llm.ProviderLibrary.instance();
+        String provider = provProviderDropdown != null ? provProviderDropdown.selectedId() : wProvProvider;
+        String model = provModelInput != null ? provModelInput.getValue().trim()
+                : (provModelDropdown != null && !CUSTOM_MODEL.equals(provModelDropdown.selectedId())
+                        ? provModelDropdown.selectedId() : "");
+        String key = provKeyInput.getValue().trim();
+        String baseUrl = provBaseUrlInput.getValue().trim();
+        if (providerEditId != null) {
+            var old = lib.get(providerEditId);
+            lib.update(new com.dwinovo.numen.agent.llm.ProviderLibrary.Entry(
+                    providerEditId, name, provider, model, key, baseUrl,
+                    old != null ? old.reasoningEffort() : ""));
+        } else {
+            lib.create(name, provider, model, key, baseUrl, "");
+        }
+        addingProvider = false;
+        providerEditId = null;
+        provCustomModel = false;
+        wProvName = ""; wProvProvider = ""; wProvModel = ""; wProvKey = ""; wProvBaseUrl = "";
+        rebuild();
     }
 
     // ---- Persona section: a library of reusable personas; apply one to the active companion ----
@@ -682,6 +892,10 @@ public final class NumenScreen extends Screen {
         }
     }
 
+    // ==== DEAD CODE — the legacy 模型接入 section was removed from the nav (2026-07-14;
+    // the 提供商 library replaces it). buildLlmWidgets / onSaveSettings / buildModelRow /
+    // buildApiKeyRow / renderLlmSettings and their dropdown click blocks are unreachable;
+    // delete wholesale in a dedicated cleanup commit. ====
     private void buildLlmWidgets() {
         int x = secX(), w = secW();
         int y0 = secY0();
@@ -847,17 +1061,107 @@ public final class NumenScreen extends Screen {
     private void renderSettings(GuiGraphics g, int mouseX, int mouseY) {
         renderSettingsNav(g);
         switch (settingsSection) {
-            case LLM -> renderLlmSettings(g);
             case MCP -> renderMcpSection(g, mouseX, mouseY);
             case SKILLS -> renderSkillsSection(g, mouseX, mouseY);
             case PERSONA -> renderPersonaSection(g, mouseX, mouseY);
+            case PROVIDER -> renderProviderSection(g, mouseX, mouseY);
+            case PROXY -> renderProxySection(g);
         }
+    }
+
+    private void renderProviderSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        // The form fills the section from the very top (5 rows + Save is a tight fit),
+        // so the section title only draws in list/confirm states — the form's own
+        // "名称(必填)" first label takes the top line.
+        if (!addingProvider) {
+            txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_TITLE), x, secY0() - 2, TXT);
+        }
+        if (providerDeletePending != null) {
+            var e = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().get(providerDeletePending);
+            txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_DELETE_CONFIRM, e != null ? e.name() : ""),
+                    x, secY0() + 10, TXT);
+            return;
+        }
+        if (addingProvider) { renderProviderForm(g); return; }
+        var list = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list();
+        if (list.isEmpty()) {
+            txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_EMPTY), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = settingsScroll; i < list.size(); i++) {
+            int ry = listY0 + (i - settingsScroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            txt(g, Component.literal(e.name()), x, ry + 1, TXT);
+            String meta = (nb(e.provider()) ? e.provider() : "?") + " · "
+                    + (nb(e.model()) ? e.model() : "?")
+                    + (nb(e.apiKey()) ? "" : " · " + I18n.get(ModLanguageData.Keys.PROVIDER_NO_KEY));
+            txt(g, Component.literal(clip(meta, w - 30)), x, ry + 11, nb(e.apiKey()) ? TXT_FAINT : FAIL);
+            txt(g, Component.literal("✎"), editX, ry + 6,
+                    overDelete(mouseX, mouseY, editX, ry) ? CTA : TXT_FAINT);
+            txt(g, Component.literal("✕"), delX, ry + 6,
+                    overDelete(mouseX, mouseY, delX, ry) ? FAIL : TXT_FAINT);
+        }
+    }
+
+    private void renderProviderForm(GuiGraphics g) {
+        int x = secX();
+        int fy = secY0();
+        txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_FORM_NAME), x, fy, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_FORM_PROVIDER), x, fy + SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_MODEL), x, fy + 2 * SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_API_KEY), x, fy + 3 * SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.PROVIDER_FORM_BASE_URL), x, fy + 4 * SET_SP, TXT_MUTED);
+    }
+
+    private static boolean nb(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    private boolean providerClick(int mx, int my) {
+        if (addingProvider || providerDeletePending != null) return false;
+        int x = secX(), w = secW();
+        var list = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list();
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = scroll; i < list.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            if (overDelete(mx, my, editX, ry)) { beginEditProvider(e); return true; }
+            if (overDelete(mx, my, delX, ry)) { providerDeletePending = e.id(); rebuild(); return true; }
+            if (overRow(mx, my, x, w, ry)) { beginEditProvider(e); return true; }
+        }
+        return false;
+    }
+
+    private void beginEditProvider(com.dwinovo.numen.agent.llm.ProviderLibrary.Entry e) {
+        addingProvider = true;
+        providerEditId = e.id();
+        wProvName = e.name() == null ? "" : e.name();
+        wProvProvider = e.provider() == null ? "" : e.provider();
+        wProvModel = e.model() == null ? "" : e.model();
+        wProvKey = e.apiKey() == null ? "" : e.apiKey();
+        wProvBaseUrl = e.baseUrl() == null ? "" : e.baseUrl();
+        // The stored model may not be in the provider's known list — open in free-text then.
+        ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(wProvProvider));
+        provCustomModel = mp == null || mp.custom()
+                || mp.models().stream().noneMatch(m -> m.id().equals(wProvModel));
+        rebuild();
     }
 
     /** The config-hub left sub-nav: 模型接入 / MCP / 技能, plus the divider. */
     private void renderSettingsNav(GuiGraphics g) {
         String[] labels = {
-                I18n.get("numen.settings.nav.llm"), I18n.get("numen.settings.nav.mcp"),
+                I18n.get(ModLanguageData.Keys.PROVIDER_TITLE), I18n.get("numen.settings.proxy"),
+                I18n.get("numen.settings.nav.mcp"),
                 I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona")};
         int navX = left + PAD;
         int y = secY0();
@@ -1101,6 +1405,7 @@ public final class NumenScreen extends Screen {
         if (settingsSection == SettingsSection.MCP) return mcpToggleClick(mx, my);
         if (settingsSection == SettingsSection.SKILLS) return skillToggleClick(mx, my);
         if (settingsSection == SettingsSection.PERSONA) return personaClick(mx, my);
+        if (settingsSection == SettingsSection.PROVIDER) return providerClick(mx, my);
         return false;
     }
 
@@ -1295,9 +1600,14 @@ public final class NumenScreen extends Screen {
         if (input == null) return;
         String text = input.getValue() == null ? "" : input.getValue().trim();
         if (text.isEmpty()) return;
-        if (!NumenLlmClient.isConfigured()) {
-            com.dwinovo.numen.Constants.LOG.warn("[numen-chat] no apiKey; open Settings.");
-            warnUntil = System.currentTimeMillis() + 4000;   // visible hint instead of a silent no-op
+        // Endpoint check for THIS companion (its provider entry, not the legacy global
+        // key): unbound / keyless surfaces as a visible hint, never a crash or a
+        // silent no-op — the no-provider safety net.
+        String problem = loop().endpointProblem();
+        if (problem != null) {
+            com.dwinovo.numen.Constants.LOG.warn("[numen-chat] {}", problem);
+            warnText = problem;
+            warnUntil = System.currentTimeMillis() + 4000;
             return;
         }
         loop().submitPrompt(text);
@@ -1328,12 +1638,25 @@ public final class NumenScreen extends Screen {
 
     private void doSummon() {
         String n = summonInput == null ? "" : summonInput.getValue().trim();
-        if (n.isEmpty()) return;
-        // Remember the picked persona by name; CompanionListPayload applies it when the new companion arrives.
+        if (n.isEmpty()) {
+            warnText = I18n.get(ModLanguageData.Keys.SUMMON_WARN_NAME);
+            warnUntil = System.currentTimeMillis() + 4000;
+            return;
+        }
+        // A model config is REQUIRED. Empty library → error AT THE CLICK, pointing
+        // the way (no ambient red text before the player acts).
+        if (summonProviderId == null) {
+            warnText = I18n.get(ModLanguageData.Keys.SUMMON_WARN_PROVIDER);
+            warnUntil = System.currentTimeMillis() + 4000;
+            return;
+        }
+        // Remember the picks by name; CompanionListPayload applies them when the new companion arrives.
         if (summonPersonaId != null) com.dwinovo.numen.persona.PersonaLibrary.pendSummon(n, summonPersonaId);
+        com.dwinovo.numen.agent.llm.ProviderLibrary.pendSummon(n, summonProviderId);
         Services.NETWORK.sendToServer(new com.dwinovo.numen.network.payload.SummonRequestPayload(n));
         summoning = false;
         summonPersonaId = null;
+        summonProviderId = null;
         rebuild();   // the new companion arrives via CompanionListPayload — click its avatar to open
     }
 
@@ -1343,10 +1666,14 @@ public final class NumenScreen extends Screen {
             return super.mouseClicked(mouseX, mouseY, button);   // modal confirm — let its Cancel/Delete buttons handle it
         }
         if (button == 0) {
-            // Summon persona dropdown gets first pick (its open list overlays the panel).
+            // Summon dropdowns get first pick (their open lists overlay the panel).
             if (summoning && summonPersonaDropdown != null && summonPersonaDropdown.mouseClicked(mouseX, mouseY)) {
                 String sel = summonPersonaDropdown.selectedId();
                 summonPersonaId = PERSONA_DEFAULT.equals(sel) ? null : sel;
+                return true;
+            }
+            if (summoning && summonProviderDropdown != null && summonProviderDropdown.mouseClicked(mouseX, mouseY)) {
+                summonProviderId = summonProviderDropdown.selectedId();
                 return true;
             }
             UUID close = railCloseAt((int) mouseX, (int) mouseY);
@@ -1400,6 +1727,31 @@ public final class NumenScreen extends Screen {
                 }
                 return true;
             }
+            // Model-config form pickers get first pick (their open lists overlay the form).
+            if (tab == Tab.SETTINGS && addingProvider && provProviderDropdown != null) {
+                String before = provProviderDropdown.selectedId();
+                if (provProviderDropdown.mouseClicked(mouseX, mouseY)) {
+                    if (provModelDropdown != null) provModelDropdown.close();
+                    String sel = provProviderDropdown.selectedId();
+                    if (!sel.equals(before)) {         // provider changed → adapt model + Base URL
+                        preserveProviderForm();
+                        adaptToProvider(sel);
+                        rebuild();
+                    }
+                    return true;
+                }
+            }
+            if (tab == Tab.SETTINGS && addingProvider && provModelDropdown != null
+                    && provModelDropdown.mouseClicked(mouseX, mouseY)) {
+                if (provProviderDropdown != null) provProviderDropdown.close();
+                if (CUSTOM_MODEL.equals(provModelDropdown.selectedId())) {   // 自定义… → free text
+                    preserveProviderForm();
+                    provCustomModel = true;
+                    wProvModel = "";
+                    rebuild();
+                }
+                return true;
+            }
             if (tab == Tab.SETTINGS && settingsClickedAt(mouseX, mouseY)) return true;
             int my = (int) mouseY;
             if (my >= top && my < top + HEADER_H) {
@@ -1443,11 +1795,12 @@ public final class NumenScreen extends Screen {
             pinBottom = scroll >= lastMaxScroll;
             return true;
         }
-        if (tab == Tab.SETTINGS && delta != 0 && settingsSection != SettingsSection.LLM && !addingPersona) {
+        if (tab == Tab.SETTINGS && delta != 0 && !addingPersona && !addingProvider) {
             int count = switch (settingsSection) {
                 case MCP -> com.dwinovo.numen.mcp.client.McpClientManager.servers().size();
                 case SKILLS -> com.dwinovo.numen.agent.skill.SkillRegistry.instance().size();
                 case PERSONA -> PersonaLibrary.instance().list().size();
+                case PROVIDER -> com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list().size();
                 default -> 0;
             };
             int listY0 = secY0() + 14;
@@ -1487,9 +1840,16 @@ public final class NumenScreen extends Screen {
             txt(g, Component.translatable("numen.dismiss.warning"),
                     left + PAD, top + HEADER_H + 30, FAIL);
         } else if (summoning) {
-            txt(g, Component.translatable("numen.summon.title"), left + PAD, top + HEADER_H + 8, TXT);
+            int y0 = top + HEADER_H;   // offsets in lockstep with buildSummonField
+            txt(g, Component.translatable("numen.summon.title"), left + PAD, y0 + 8, TXT);
+            txt(g, Component.translatable(ModLanguageData.Keys.SUMMON_NAME), left + PAD, y0 + 24, TXT_MUTED);
+            placeholder(g, summonInput, I18n.get(ModLanguageData.Keys.SUMMON_NAME_PLACEHOLDER));
+            txt(g, Component.translatable(ModLanguageData.Keys.SUMMON_PERSONA_LABEL), left + PAD, y0 + 58, TXT_MUTED);
+            txt(g, Component.literal(I18n.get(ModLanguageData.Keys.PROVIDER_TITLE)
+                    + (summonProviderDropdown == null ? I18n.get(ModLanguageData.Keys.SUMMON_PROVIDER_EMPTY) : "")),
+                    left + PAD, y0 + 92, TXT_MUTED);
             txt(g, Component.translatable("numen.summon.hint"),
-                    left + PAD, top + HEADER_H + 74, TXT_FAINT);
+                    left + PAD, y0 + 152, TXT_FAINT);
         } else {
             if (uuid != null) {
                 if (compactButton != null) compactButton.active = loop().canCompact();
@@ -1500,8 +1860,9 @@ public final class NumenScreen extends Screen {
                 case CHAT -> { if (uuid != null) renderChat(g); else emptyHint(g); }
                 case ITEMS -> { if (uuid != null) renderItems(g, mouseX, mouseY); else emptyHint(g); }
             }
-            if (tab == Tab.CHAT && warnUntil > System.currentTimeMillis()) {   // no-API-key hint above the input
-                txt(g, Component.translatable("numen.chat.no_key"),
+            if (tab == Tab.CHAT && warnUntil > System.currentTimeMillis()) {   // endpoint-problem hint above the input
+                txt(g, warnText != null ? Component.literal(warnText)
+                                : Component.translatable("numen.chat.no_key"),
                         left + PAD, top + PANEL_H - INPUT_H - PAD - 11, FAIL);
             }
         }
@@ -1519,17 +1880,25 @@ public final class NumenScreen extends Screen {
         for (AbstractWidget w : overlay) {
             w.render(g, mouseX, mouseY, partial);
         }
-        // Base URL / Proxy placeholders, drawn shadowless by us (the EditBox hint renders with a shadow).
-        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.LLM) {
-            String urlPh = addingSite ? "https://… (OpenAI-compatible)"
-                    : LlmProviders.byId(providerDropdown.selectedId()).defaultBaseUrl();
-            placeholder(g, baseUrlInput, urlPh);
-            placeholder(g, proxyInput, "host:port (optional)");
-            // Model + site-name placeholders, also shadowless (these EditBoxes are null outside
-            // custom-model / add-site mode, and placeholder() no-ops on null/non-empty/focused).
-            placeholder(g, modelInput, addingSite ? "model id"
-                    : LlmProviders.byId(providerDropdown.selectedId()).defaultModel());
-            if (addingSite) placeholder(g, siteNameInput, "e.g. My Proxy");
+        // Field placeholders, drawn shadowless by us (the EditBox hint renders with a shadow).
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PROVIDER && addingProvider) {
+            placeholder(g, provKeyInput, "sk-…");
+            placeholder(g, provBaseUrlInput, "https://… (OpenAI-compatible)");
+            placeholder(g, provModelInput, "model id");
+        }
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PROXY) {
+            placeholder(g, proxyIpInput, "127.0.0.1");
+            placeholder(g, proxyPortInput, "7890");
+        }
+        // The model-config form's open dropdown lists must sit above the fields.
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PROVIDER && addingProvider) {
+            if (provModelDropdown != null && provProviderDropdown != null && provProviderDropdown.isOpen()) {
+                provModelDropdown.render(g, font, mouseX, mouseY);
+                provProviderDropdown.render(g, font, mouseX, mouseY);
+            } else {
+                if (provProviderDropdown != null) provProviderDropdown.render(g, font, mouseX, mouseY);
+                if (provModelDropdown != null) provModelDropdown.render(g, font, mouseX, mouseY);
+            }
         }
         if (tab == Tab.SETTINGS && settingsSection == SettingsSection.MCP && addingMcp) {
             placeholder(g, mcpNameInput, "kfc");
@@ -1541,19 +1910,14 @@ public final class NumenScreen extends Screen {
         }
         // (Chat-input placeholder is the FlatEditBox hint now — drawn shadowless and under the
         // caret in the widget pass, so it can't paint over the caret like a screen-side draw did.)
-        // The provider dropdown's open list must sit above even the fields.
-        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.LLM) {
-            // render the non-open one first so the open list draws on top
-            if (modelDropdown != null && providerDropdown != null && providerDropdown.isOpen()) {
-                modelDropdown.render(g, font, mouseX, mouseY);
-                providerDropdown.render(g, font, mouseX, mouseY);
-            } else {
-                if (providerDropdown != null) providerDropdown.render(g, font, mouseX, mouseY);
-                if (modelDropdown != null) modelDropdown.render(g, font, mouseX, mouseY);
-            }
+        // Summon warn — shown only when 创建 was clicked and something is missing
+        // (error at the action, never ambient text). Takes the hint line's spot.
+        if (summoning && warnUntil > System.currentTimeMillis() && warnText != null) {
+            g.drawString(font, warnText, left + PAD, top + HEADER_H + 152, 0xFFCC6666, false);
         }
-
-        // Summon persona dropdown — drawn late so its open list sits above the summon field.
+        if (summoning && summonProviderDropdown != null) {
+            summonProviderDropdown.render(g, font, mouseX, mouseY);
+        }
         if (summoning && summonPersonaDropdown != null) {
             summonPersonaDropdown.render(g, font, mouseX, mouseY);
         }
