@@ -1,94 +1,123 @@
 package com.dwinovo.numen.persona;
 
 import com.dwinovo.numen.Constants;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
- * The player's library of reusable personas, at {@code config/numen/personas.json} — the authoring
- * surface behind the panel's "人设" tab. A persona is a short "who you are" text; assigning one to a
- * companion copies its {@code text} into that companion (via {@code EntityAgentLoop.setPersona}), so
- * later library edits don't retroactively mutate a live companion.
+ * 玩家的人设库:{@code config/numen/persona/} 目录,<b>一个 .md 文件就是一个人设</b>。
+ * 文件名即人设名与 id(天然不重名),文件内容想写啥写啥——全文原样注入
+ * {@code <persona>},零结构约束,UI 列表用正文截断做预览。
  *
- * <p>Read-only <b>presets</b> ({@code preset:true}) are regenerated from {@link #defaults()} on every
- * load (so they can't be corrupted or lost); the file only persists user-created personas. Mirrors the
- * degrade-on-unreadable, pretty-Gson style of {@code McpClientConfig}. Client-side singleton.
+ * <p>内置示例存在 jar 资源里({@code assets/numen_api/persona/}),目录中的
+ * {@code .init} 哨兵文件缺失时(首次运行/被手动删除)从 jar 复制出缺失的示例并
+ * 重写哨兵——已存在的同名文件不覆盖,用户的修改不会被吃掉。
+ *
+ * <p>旧版 {@code personas.json} 的用户条目首次加载时自动迁移为 .md
+ * (原文件改名 .bak)。客户端单例。
  */
 public final class PersonaLibrary {
 
-    /** One persona template. {@code preset} personas are built-in and immutable (clone to customize). */
+    /** One persona. {@code id == name == 文件名};{@code preset} 恒 false(示例落盘后就是普通文件)。 */
     public record Persona(String id, String name, String text, boolean preset) {}
 
-    private static final Gson PRETTY = new GsonBuilder().setPrettyPrinting().create();
+    /** 哨兵文件:删掉它,下次启动重新从 jar 复制缺失的内置示例。 */
+    private static final String INIT_MARKER = ".init";
+    /** jar 里的内置示例(资源路径 assets/numen_api/persona/ 下的文件名)。
+     *  原型覆盖:傲娇(小焰)/猫娘(团子)/温柔守护者(暖暖)/元气伙伴(阿光)/
+     *  沉稳老哥(老墨)——低龄玩家也有零门槛的选择。 */
+    private static final String[] EXAMPLES = {"小焰.md", "团子.md", "暖暖.md", "阿光.md", "老墨.md"};
+
     private static PersonaLibrary instance;
 
-    private final Path file;
+    private final Path dir;
+    private final Path legacyJson;
     private final Map<String, Persona> personas = new LinkedHashMap<>();
 
-    private PersonaLibrary(Path file) {
-        this.file = file;
+    private PersonaLibrary(Path dir, Path legacyJson) {
+        this.dir = dir;
+        this.legacyJson = legacyJson;
     }
 
     public static PersonaLibrary instance() {
         if (instance == null) {
-            Path dir = Minecraft.getInstance().gameDirectory.toPath()
+            Path cfg = Minecraft.getInstance().gameDirectory.toPath()
                     .resolve("config").resolve("numen");
-            instance = new PersonaLibrary(dir.resolve("personas.json"));
+            instance = new PersonaLibrary(cfg.resolve("persona"), cfg.resolve("personas.json"));
             instance.load();
         }
         return instance;
     }
 
-    /** All personas (presets first, then user-created), in library order. */
+    /** 重扫目录——打开人设页/召唤面板时调用,外部编辑器的修改即时可见。 */
+    public void reload() {
+        load();
+    }
+
+    /** All personas, 文件名序。 */
     public List<Persona> list() {
         return new ArrayList<>(personas.values());
     }
 
     public Persona get(String id) {
-        return personas.get(id);
+        return id == null ? null : personas.get(id);
     }
 
-    /** Create a new user persona and persist. */
+    /** 新建人设 = 写一个 .md。重名自动加 _2 后缀(文件名即身份)。 */
     public Persona create(String name, String text) {
-        String id = "p_" + Long.toHexString(System.currentTimeMillis()) + "_" + personas.size();
-        Persona p = new Persona(id, name, text, false);
+        String id = uniqueName(sanitizeName(name));
+        if (!write(id, text)) return null;
+        Persona p = new Persona(id, id, text, false);
         personas.put(id, p);
-        save();
         return p;
     }
 
-    /** Edit a user persona (no-op on presets). */
-    public void update(String id, String name, String text) {
+    /** 编辑人设;改名 = 换文件名(旧文件删除,id 随之更换)。返回落盘后的条目。 */
+    public Persona update(String id, String name, String text) {
         Persona old = personas.get(id);
-        if (old == null || old.preset()) return;
-        personas.put(id, new Persona(id, name, text, false));
-        save();
+        if (old == null) return null;
+        String newId = sanitizeName(name);
+        if (!newId.equals(id)) {
+            newId = uniqueName(newId);
+            try {
+                Files.deleteIfExists(dir.resolve(id + ".md"));
+            } catch (IOException ex) {
+                Constants.LOG.warn("[numen-persona] 旧人设文件删除失败 {}: {}", id, ex.toString());
+            }
+            personas.remove(id);
+        }
+        if (!write(newId, text)) return null;
+        Persona p = new Persona(newId, newId, text, false);
+        personas.put(newId, p);
+        return p;
     }
 
-    /** Delete a user persona (no-op on presets). */
+    /** 删除人设文件。 */
     public void remove(String id) {
-        Persona p = personas.get(id);
-        if (p != null && !p.preset()) {
-            personas.remove(id);
-            save();
+        if (personas.remove(id) == null) return;
+        try {
+            Files.deleteIfExists(dir.resolve(id + ".md"));
+        } catch (IOException ex) {
+            Constants.LOG.warn("[numen-persona] 人设文件删除失败 {}: {}", id, ex.toString());
         }
     }
 
-    /** Clone any persona (incl. a preset) into a new editable user copy. */
+    /** 复制一份可编辑副本。 */
     public Persona clonePersona(String id) {
         Persona src = personas.get(id);
         if (src == null) return null;
@@ -117,63 +146,119 @@ public final class PersonaLibrary {
 
     private void load() {
         personas.clear();
-        for (Persona p : defaults()) personas.put(p.id(), p);   // presets always fresh, never from file
-        if (!Files.isRegularFile(file)) {
-            save();   // seed the file on first launch
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException ex) {
+            Constants.LOG.warn("[numen-persona] 人设目录创建失败 {}: {}", dir, ex.toString());
             return;
         }
+        if (!Files.exists(dir.resolve(INIT_MARKER))) {
+            seedExamples();
+        }
+        migrateLegacyJson();
+        try (Stream<Path> files = Files.list(dir)) {
+            files.filter(p -> p.getFileName().toString().endsWith(".md"))
+                    .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+                    .forEach(p -> {
+                        String stem = p.getFileName().toString();
+                        stem = stem.substring(0, stem.length() - 3);
+                        try {
+                            String text = Files.readString(p, StandardCharsets.UTF_8).strip();
+                            if (!text.isEmpty()) {
+                                personas.put(stem, new Persona(stem, stem, text, false));
+                            }
+                        } catch (IOException ex) {
+                            Constants.LOG.warn("[numen-persona] 人设读取失败 {}: {}", p, ex.toString());
+                        }
+                    });
+        } catch (IOException ex) {
+            Constants.LOG.warn("[numen-persona] 人设目录扫描失败: {}", ex.toString());
+        }
+    }
+
+    /** 旧版 personas.json 的用户条目一次性迁移为 .md,原文件改名 .bak。 */
+    private void migrateLegacyJson() {
+        if (!Files.isRegularFile(legacyJson)) return;
+        int migrated = 0;
         try {
-            JsonObject o = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+            JsonObject o = JsonParser.parseString(
+                    Files.readString(legacyJson, StandardCharsets.UTF_8)).getAsJsonObject();
             if (o.has("personas") && o.get("personas").isJsonArray()) {
                 for (JsonElement el : o.getAsJsonArray("personas")) {
                     if (!el.isJsonObject()) continue;
                     JsonObject po = el.getAsJsonObject();
-                    if (po.has("preset") && po.get("preset").getAsBoolean()) continue;   // presets from defaults()
-                    String id = str(po, "id");
-                    if (id.isEmpty()) continue;
-                    personas.put(id, new Persona(id, str(po, "name"), str(po, "text"), false));
+                    if (po.has("preset") && po.get("preset").getAsBoolean()) continue;
+                    String name = str(po, "name");
+                    String text = str(po, "text");
+                    if (text.isBlank()) continue;
+                    String id = uniqueName(sanitizeName(name.isBlank() ? str(po, "id") : name));
+                    if (write(id, text)) migrated++;
                 }
             }
+            Files.move(legacyJson, legacyJson.resolveSibling("personas.json.bak"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            Constants.LOG.info("[numen-persona] personas.json 已迁移 {} 条用户人设为 .md", migrated);
         } catch (IOException | RuntimeException ex) {
-            Constants.LOG.warn("[numen-persona] unreadable {} — using presets only: {}", file, ex.toString());
+            Constants.LOG.warn("[numen-persona] personas.json 迁移失败(保留原文件): {}", ex.toString());
         }
     }
 
-    private void save() {
-        JsonObject root = new JsonObject();
-        JsonArray arr = new JsonArray();
-        for (Persona p : personas.values()) {
-            JsonObject po = new JsonObject();
-            po.addProperty("id", p.id());
-            po.addProperty("name", p.name());
-            po.addProperty("text", p.text());
-            po.addProperty("preset", p.preset());
-            arr.add(po);
-        }
-        root.add("personas", arr);
+    private boolean write(String id, String text) {
         try {
-            Files.createDirectories(file.getParent());
-            Files.writeString(file, PRETTY.toJson(root), StandardCharsets.UTF_8);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(id + ".md"),
+                    (text == null ? "" : text.strip()) + "\n", StandardCharsets.UTF_8);
+            return true;
         } catch (IOException ex) {
-            Constants.LOG.warn("[numen-persona] failed to write {}: {}", file, ex.toString());
+            Constants.LOG.warn("[numen-persona] 人设写盘失败 {}: {}", id, ex.toString());
+            return false;
         }
     }
 
-    /** Built-in read-only presets. Persona defines personality only — the operating core is fixed elsewhere. */
-    private static List<Persona> defaults() {
-        return List.of(
-                new Persona("preset_lively", "活泼助手",
-                        "你性格开朗、热情、乐于助人，说话简短有活力。", true),
-                new Persona("preset_steady", "沉稳向导",
-                        "你沉着老练、经验丰富，说话简洁可靠，像个可信赖的向导。", true),
-                new Persona("preset_swordsman", "毒舌剑客",
-                        "你是个高冷毒舌但靠谱的战斗型伙伴，话不多、偏冷，关键时刻绝对可靠。", true),
-                new Persona("preset_scholar", "话痨学者",
-                        "你博学好奇、话略多，喜欢解释来龙去脉，但不会啰嗦到误事。", true));
+    /** 文件名合法化:去掉 Windows 非法字符与首尾空白;空名回落 "persona"。 */
+    private static String sanitizeName(String raw) {
+        String s = raw == null ? "" : raw.strip().replaceAll("[\\\\/:*?\"<>|]", "");
+        return s.isEmpty() ? "persona" : s;
+    }
+
+    /** 已存在同名文件时追加 _2/_3…(文件名即身份,不覆盖别人)。 */
+    private String uniqueName(String base) {
+        String cand = base;
+        int i = 2;
+        while (Files.exists(dir.resolve(cand + ".md"))) {
+            cand = base + "_" + i++;
+        }
+        return cand;
     }
 
     private static String str(JsonObject o, String key) {
         JsonElement el = o.get(key);
         return el == null || el.isJsonNull() ? "" : el.getAsString();
+    }
+
+    // ---- 内置示例:从 jar 资源复制(.init 哨兵缺失时) ----
+
+    private void seedExamples() {
+        for (String res : EXAMPLES) {
+            Path target = dir.resolve(res);
+            if (Files.exists(target)) continue;   // 用户改过的/已有的不覆盖
+            try (InputStream in = PersonaLibrary.class.getResourceAsStream(
+                    "/assets/numen_api/persona/" + res)) {
+                if (in == null) {
+                    Constants.LOG.warn("[numen-persona] jar 内示例缺失: {}", res);
+                    continue;
+                }
+                Files.copy(in, target);
+            } catch (IOException ex) {
+                Constants.LOG.warn("[numen-persona] 示例复制失败 {}: {}", res, ex.toString());
+            }
+        }
+        try {
+            Files.writeString(dir.resolve(INIT_MARKER),
+                    "删除此文件后,下次启动会从模组内恢复内置示例人设(不覆盖已存在的同名文件)。\n",
+                    StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            Constants.LOG.warn("[numen-persona] .init 哨兵写入失败: {}", ex.toString());
+        }
     }
 }

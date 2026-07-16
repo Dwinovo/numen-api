@@ -46,6 +46,12 @@ public class NumenMod {
         // When an owner logs in, bring their dormant companions back.
         MinecraftForge.EVENT_BUS.addListener(NumenMod::onPlayerLoggedIn);
         MinecraftForge.EVENT_BUS.addListener(NumenMod::onPlayerChangedDimension);
+        // 排程机器的心跳:每 tick 驱动全部同伴的竞价/任务/收尾。
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+            if (e.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+                com.dwinovo.numen.task.CompanionTickDispatcher.tick(e.getServer());
+            }
+        });
 
         // Client init (key mappings / HUD / world-render path overlay) is wired
         // from the client class, only on the physical client.

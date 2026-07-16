@@ -6,7 +6,6 @@ import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
@@ -37,7 +36,6 @@ public final class NumenForgeClient {
         modBus.addListener(NumenForgeClient::registerReloadListeners);
         // Game bus — per-tick / world-render / disconnect.
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onClientTick);
-        MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onRenderLevel);
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onLoggingOut);
     }
 
@@ -55,18 +53,7 @@ public final class NumenForgeClient {
         com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
     }
 
-    static void onRenderLevel(RenderLevelStageEvent event) {
-        // Draw after translucent terrain so the overlay sits over the world.
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
-            return;
-        }
-        // In-world path overlay for every companion (path line + break/place/goal boxes).
-        com.dwinovo.numen.client.path.PathVizRenderer.render(event.getPoseStack());
-    }
-
     static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
-        // Drop every path overlay on disconnect so a frozen path can't survive a relog.
-        com.dwinovo.numen.client.path.ClientPathViz.clearAll();
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();

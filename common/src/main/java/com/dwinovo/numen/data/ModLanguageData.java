@@ -63,6 +63,30 @@ public final class ModLanguageData {
         public static final String SUMMON_NAME_PLACEHOLDER = "numen.summon.name_placeholder";
         public static final String SUMMON_PERSONA_LABEL    = "numen.summon.persona_label";
         public static final String SUMMON_PERSONA_NONE     = "numen.summon.persona_none";
+        public static final String SUMMON_WARN_NAME_FORMAT = "numen.summon.warn_name_format";
+        public static final String SUMMON_SKIN             = "numen.summon.skin";
+        public static final String SUMMON_SKIN_DEFAULT     = "numen.summon.skin_default";
+
+        // Skin library tab (upload png → MineSkin-signed textures).
+        public static final String SKIN_TITLE           = "numen.skin.title";
+        public static final String SKIN_ADD             = "numen.skin.add";
+        public static final String SKIN_EMPTY           = "numen.skin.empty";
+        public static final String SKIN_FORM_NAME       = "numen.skin.form_name";
+        public static final String SKIN_FORM_VARIANT    = "numen.skin.form_variant";
+        public static final String SKIN_VARIANT_CLASSIC = "numen.skin.variant_classic";
+        public static final String SKIN_VARIANT_SLIM    = "numen.skin.variant_slim";
+        public static final String SKIN_DROP_HINT       = "numen.skin.drop_hint";
+        public static final String SKIN_LOADED          = "numen.skin.loaded";
+        public static final String SKIN_KEEP_OLD        = "numen.skin.keep_old";
+        public static final String SKIN_SIGNING         = "numen.skin.signing";
+        public static final String SKIN_SIGN_FAIL       = "numen.skin.sign_fail";
+        public static final String SKIN_WARN_NAME       = "numen.skin.warn_name";
+        public static final String SKIN_WARN_IMAGE      = "numen.skin.warn_image";
+        public static final String SKIN_WARN_SIZE       = "numen.skin.warn_size";
+        public static final String SKIN_WARN_READ       = "numen.skin.warn_read";
+        public static final String SKIN_SIGNED          = "numen.skin.signed";
+        public static final String SKIN_UNSIGNED        = "numen.skin.unsigned";
+        public static final String SKIN_DELETE_CONFIRM  = "numen.skin.delete_confirm";
         public static final String SUMMON_PROVIDER_EMPTY   = "numen.summon.provider_empty";
         public static final String SUMMON_CREATE           = "numen.summon.create";
         public static final String SUMMON_WARN_NAME        = "numen.summon.warn_name";
@@ -71,6 +95,42 @@ public final class ModLanguageData {
         // Endpoint problems surfaced in chat (EntityAgentLoop#endpointProblem).
         public static final String ENDPOINT_UNBOUND = "numen.endpoint.unbound";
         public static final String ENDPOINT_NO_KEY  = "numen.endpoint.no_key";
+
+        // Voice (TTS) section: nav label, global switch, entry list/form, preview, bindings.
+        public static final String VOICE_TITLE          = "numen.voice.title";
+        public static final String VOICE_ENABLED        = "numen.voice.enabled";
+        public static final String VOICE_EMPTY          = "numen.voice.empty";
+        public static final String VOICE_ADD            = "numen.voice.add";
+        public static final String VOICE_DELETE_CONFIRM = "numen.voice.delete_confirm";
+        public static final String VOICE_FORM_NAME      = "numen.voice.form_name";
+        public static final String VOICE_BACKEND_OPENAI  = "numen.voice.backend_openai";
+        public static final String VOICE_BACKEND_SOVITS  = "numen.voice.backend_sovits";
+        public static final String VOICE_BACKEND_MINIMAX = "numen.voice.backend_minimax";
+        public static final String VOICE_BACKEND_FISH    = "numen.voice.backend_fish";
+        public static final String VOICE_FORM_URL       = "numen.voice.form_url";
+        public static final String VOICE_FORM_KEY_OPENAI  = "numen.voice.form_key_openai";
+        public static final String VOICE_FORM_KEY_MINIMAX = "numen.voice.form_key_minimax";
+        public static final String VOICE_FORM_KEY_FISH    = "numen.voice.form_key_fish";
+        public static final String VOICE_FORM_MINIMAX_MODEL = "numen.voice.form_minimax_model";
+        public static final String VOICE_FORM_MINIMAX_VOICE = "numen.voice.form_minimax_voice";
+        public static final String VOICE_FORM_GROUP     = "numen.voice.form_group";
+        public static final String VOICE_FORM_REFERENCE = "numen.voice.form_reference";
+        public static final String VOICE_FORM_FISH_MODEL = "numen.voice.form_fish_model";
+        public static final String VOICE_FORM_MODEL     = "numen.voice.form_model";
+        public static final String VOICE_FORM_VOICE     = "numen.voice.form_voice";
+        public static final String VOICE_FORM_REF       = "numen.voice.form_ref";
+        public static final String VOICE_FORM_PROMPT    = "numen.voice.form_prompt";
+        public static final String VOICE_FORM_LANG      = "numen.voice.form_lang";
+        public static final String VOICE_FORM_VOLUME    = "numen.voice.form_volume";
+        public static final String VOICE_TEST           = "numen.voice.test";
+        public static final String VOICE_TEST_RUNNING   = "numen.voice.test_running";
+        public static final String VOICE_TEST_OK        = "numen.voice.test_ok";
+        public static final String VOICE_TEST_FAIL      = "numen.voice.test_fail";
+        public static final String VOICE_WARN_NAME      = "numen.voice.warn_name";
+        public static final String VOICE_BIND_LABEL     = "numen.voice.bind_label";
+        public static final String VOICE_BIND_NONE      = "numen.voice.bind_none";
+        public static final String VOICE_SUMMON_LABEL   = "numen.voice.summon_label";
+        public static final String VOICE_SUMMON_EMPTY   = "numen.voice.summon_empty";
     }
 
     /** Loader-side providers funnel both English and Simplified Chinese through here. */
@@ -135,6 +195,9 @@ public final class ModLanguageData {
         adder.add("numen.chat.steps", "%s steps");
         adder.add("numen.chat.plan", "PLAN");
         adder.add("numen.chat.no_plan", "no plan yet");
+        adder.add("numen.chat.usage_tip.context", "context: how full the model's memory window is — near the top it compacts itself, nothing to do");
+        adder.add("numen.chat.usage_tip.tokens", "tokens: cumulative fresh work = cache-missed input + output");
+        adder.add("numen.chat.usage_tip.cache", "cached input is free-ish and not counted, so most messages add only a little");
         adder.add("numen.mcp.title", "MCP Tools");
         adder.add("numen.mcp.empty", "None · click ＋ Add (top-right)");
         adder.add("numen.mcp.add", "＋ Add");
@@ -181,10 +244,32 @@ public final class ModLanguageData {
         adder.add(Keys.SETTINGS_PROXY_PORT, "Port");
 
         // Summon page
-        adder.add(Keys.SUMMON_NAME,             "Name");
-        adder.add(Keys.SUMMON_NAME_PLACEHOLDER, "Give it a name, e.g. Kyu");
+        adder.add(Keys.SUMMON_NAME,             "Name (letters/digits/_; a premium player's name borrows their skin)");
+        adder.add(Keys.SUMMON_NAME_PLACEHOLDER, "e.g. Kyu — name a premium player to wear their skin");
         adder.add(Keys.SUMMON_PERSONA_LABEL,    "Persona");
         adder.add(Keys.SUMMON_PERSONA_NONE,     "None");
+        adder.add(Keys.SUMMON_WARN_NAME_FORMAT, "Name must be 3–16 letters/digits/underscores (Minecraft naming rules)");
+        adder.add(Keys.SUMMON_SKIN,             "Skin");
+        adder.add(Keys.SUMMON_SKIN_DEFAULT,     "Default (by name)");
+        adder.add(Keys.SKIN_TITLE,           "Skins");
+        adder.add(Keys.SKIN_ADD,             "New");
+        adder.add(Keys.SKIN_EMPTY,           "No skins yet. Click New, then drag a skin png into the window.");
+        adder.add(Keys.SKIN_FORM_NAME,       "Name (required)");
+        adder.add(Keys.SKIN_FORM_VARIANT,    "Arm model");
+        adder.add(Keys.SKIN_VARIANT_CLASSIC, "Classic (wide arms)");
+        adder.add(Keys.SKIN_VARIANT_SLIM,    "Slim (thin arms)");
+        adder.add(Keys.SKIN_DROP_HINT,       "Drag a skin png (64x64) into the game window");
+        adder.add(Keys.SKIN_LOADED,          "Loaded %s ✓ — Save signs it via MineSkin");
+        adder.add(Keys.SKIN_KEEP_OLD,        "Keeping the current image (drag a new png to replace)");
+        adder.add(Keys.SKIN_SIGNING,         "Signing via MineSkin… (a few seconds)");
+        adder.add(Keys.SKIN_SIGN_FAIL,       "Signing failed: %s");
+        adder.add(Keys.SKIN_WARN_NAME,       "Name is required");
+        adder.add(Keys.SKIN_WARN_IMAGE,      "Drag a skin png into the window first");
+        adder.add(Keys.SKIN_WARN_SIZE,       "Skin must be 64x64 (or legacy 64x32), got %s");
+        adder.add(Keys.SKIN_WARN_READ,       "Couldn't read the file: %s");
+        adder.add(Keys.SKIN_SIGNED,          "signed");
+        adder.add(Keys.SKIN_UNSIGNED,        "not signed — edit & Save to retry");
+        adder.add(Keys.SKIN_DELETE_CONFIRM,  "Delete skin \"%s\"?");
         adder.add(Keys.SUMMON_PROVIDER_EMPTY,   " (empty — create one in Settings → Model Configs)");
         adder.add(Keys.SUMMON_CREATE,           "Create");
         adder.add(Keys.SUMMON_WARN_NAME,        "Give your companion a name first");
@@ -193,6 +278,42 @@ public final class ModLanguageData {
         // Endpoint problems (chat warn line)
         adder.add(Keys.ENDPOINT_UNBOUND, "This companion has no model config bound — pick or create one in Settings → Model Configs");
         adder.add(Keys.ENDPOINT_NO_KEY,  "Model config \"%s\" has no API Key yet — add it in Settings → Model Configs");
+
+        // Voice (TTS) section
+        adder.add(Keys.VOICE_TITLE,          "Voice");
+        adder.add(Keys.VOICE_ENABLED,        "Enabled");
+        adder.add(Keys.VOICE_EMPTY,          "No voice yet — click New (top-right) to create one");
+        adder.add(Keys.VOICE_ADD,            "New");
+        adder.add(Keys.VOICE_DELETE_CONFIRM, "Delete voice \"%s\"? Companions bound to it fall silent.");
+        adder.add(Keys.VOICE_FORM_NAME,      "Name (required)");
+        adder.add(Keys.VOICE_BACKEND_OPENAI,  "OpenAI-compatible");
+        adder.add(Keys.VOICE_BACKEND_SOVITS,  "GPT-SoVITS");
+        adder.add(Keys.VOICE_BACKEND_MINIMAX, "MiniMax");
+        adder.add(Keys.VOICE_BACKEND_FISH,    "Fish Audio");
+        adder.add(Keys.VOICE_FORM_URL,       "Service URL (prefilled per provider, editable)");
+        adder.add(Keys.VOICE_FORM_KEY_OPENAI,  "API Key (create in your provider's console)");
+        adder.add(Keys.VOICE_FORM_KEY_MINIMAX, "API Key (MiniMax console > Account > API keys)");
+        adder.add(Keys.VOICE_FORM_KEY_FISH,    "API Key (fish.audio > API credentials)");
+        adder.add(Keys.VOICE_FORM_MINIMAX_MODEL, "Model (blank = speech-02-turbo)");
+        adder.add(Keys.VOICE_FORM_MINIMAX_VOICE, "voice_id (copy from the Voices library)");
+        adder.add(Keys.VOICE_FORM_GROUP,     "GroupId (fill if API errors ask for it)");
+        adder.add(Keys.VOICE_FORM_REFERENCE, "Voice reference_id (paste the voice page URL or ID; blank = account default)");
+        adder.add(Keys.VOICE_FORM_FISH_MODEL, "Synthesis model (blank = default; s2.1-pro-free = free tier)");
+        adder.add(Keys.VOICE_FORM_MODEL,     "TTS model id");
+        adder.add(Keys.VOICE_FORM_VOICE,     "Voice (format model:voice)");
+        adder.add(Keys.VOICE_FORM_REF,       "Reference audio path (on the GPT-SoVITS machine)");
+        adder.add(Keys.VOICE_FORM_PROMPT,    "Transcript of the reference audio");
+        adder.add(Keys.VOICE_FORM_LANG,      "Language (blank = zh)");
+        adder.add(Keys.VOICE_FORM_VOLUME,    "Volume 1–10 (default 5)");
+        adder.add(Keys.VOICE_TEST,           "Preview");
+        adder.add(Keys.VOICE_TEST_RUNNING,   "Synthesizing…");
+        adder.add(Keys.VOICE_TEST_OK,        "✔ Playing");
+        adder.add(Keys.VOICE_TEST_FAIL,      "Preview failed: %s");
+        adder.add(Keys.VOICE_WARN_NAME,      "Name is required");
+        adder.add(Keys.VOICE_BIND_LABEL,     "This companion");
+        adder.add(Keys.VOICE_BIND_NONE,      "None (silent)");
+        adder.add(Keys.VOICE_SUMMON_LABEL,   "Voice");
+        adder.add(Keys.VOICE_SUMMON_EMPTY,   " (empty — create one in Settings → Voice)");
     }
 
     private static void addZh(Adder adder) {
@@ -248,6 +369,9 @@ public final class ModLanguageData {
         adder.add("numen.chat.steps", "%s 步");
         adder.add("numen.chat.plan", "计划");
         adder.add("numen.chat.no_plan", "暂无计划");
+        adder.add("numen.chat.usage_tip.context", "context：对话占模型记忆窗口的比例，快满时会自动压缩，无需操作");
+        adder.add("numen.chat.usage_tip.tokens", "tokens：累计新处理量 = 未命中缓存的输入 + 输出");
+        adder.add("numen.chat.usage_tip.cache", "命中缓存的输入不计入，所以平时每条消息只涨一点");
         adder.add("numen.mcp.title", "MCP 工具");
         adder.add("numen.mcp.empty", "无 · 点右上「＋ 添加」");
         adder.add("numen.mcp.add", "＋ 添加");
@@ -294,10 +418,32 @@ public final class ModLanguageData {
         adder.add(Keys.SETTINGS_PROXY_PORT, "端口");
 
         // Summon page
-        adder.add(Keys.SUMMON_NAME,             "名字");
-        adder.add(Keys.SUMMON_NAME_PLACEHOLDER, "给它起个名字,如:小玖");
+        adder.add(Keys.SUMMON_NAME,             "名字(英文,填正版玩家名可穿它的皮肤)");
+        adder.add(Keys.SUMMON_NAME_PLACEHOLDER, "如 Kyu;填正版玩家名自动穿同名皮肤");
         adder.add(Keys.SUMMON_PERSONA_LABEL,    "人设");
         adder.add(Keys.SUMMON_PERSONA_NONE,     "无");
+        adder.add(Keys.SUMMON_WARN_NAME_FORMAT, "名字需为 3~16 位英文字母/数字/下划线(Minecraft 官方命名规则)");
+        adder.add(Keys.SUMMON_SKIN,             "皮肤");
+        adder.add(Keys.SUMMON_SKIN_DEFAULT,     "默认(按名字)");
+        adder.add(Keys.SKIN_TITLE,           "皮肤库");
+        adder.add(Keys.SKIN_ADD,             "新建");
+        adder.add(Keys.SKIN_EMPTY,           "还没有皮肤。点右上角\"新建\",再把皮肤 png 拖进游戏窗口。");
+        adder.add(Keys.SKIN_FORM_NAME,       "名称(必填)");
+        adder.add(Keys.SKIN_FORM_VARIANT,    "手臂模型");
+        adder.add(Keys.SKIN_VARIANT_CLASSIC, "经典(粗手臂)");
+        adder.add(Keys.SKIN_VARIANT_SLIM,    "纤细(瘦手臂)");
+        adder.add(Keys.SKIN_DROP_HINT,       "把皮肤 png(64x64)直接拖进游戏窗口");
+        adder.add(Keys.SKIN_LOADED,          "已加载 %s ✓——点保存经 MineSkin 签名");
+        adder.add(Keys.SKIN_KEEP_OLD,        "沿用当前图片(拖入新 png 可替换)");
+        adder.add(Keys.SKIN_SIGNING,         "MineSkin 签名中…(需要几秒)");
+        adder.add(Keys.SKIN_SIGN_FAIL,       "签名失败: %s");
+        adder.add(Keys.SKIN_WARN_NAME,       "名称必填");
+        adder.add(Keys.SKIN_WARN_IMAGE,      "先把皮肤 png 拖进游戏窗口");
+        adder.add(Keys.SKIN_WARN_SIZE,       "皮肤需为 64x64(或旧版 64x32),拖入的是 %s");
+        adder.add(Keys.SKIN_WARN_READ,       "文件读取失败: %s");
+        adder.add(Keys.SKIN_SIGNED,          "已签名");
+        adder.add(Keys.SKIN_UNSIGNED,        "未签名——编辑后保存可重试");
+        adder.add(Keys.SKIN_DELETE_CONFIRM,  "删除皮肤「%s」?");
         adder.add(Keys.SUMMON_PROVIDER_EMPTY,   "(空——到 设置 → 模型配置 新建)");
         adder.add(Keys.SUMMON_CREATE,           "创建");
         adder.add(Keys.SUMMON_WARN_NAME,        "先给同伴起个名字");
@@ -306,5 +452,41 @@ public final class ModLanguageData {
         // Endpoint problems (chat warn line)
         adder.add(Keys.ENDPOINT_UNBOUND, "这个同伴还没有绑定模型配置——到 设置 → 模型配置 新建/选择一条");
         adder.add(Keys.ENDPOINT_NO_KEY,  "模型配置「%s」还没填 API Key——到 设置 → 模型配置 补上");
+
+        // Voice (TTS) section
+        adder.add(Keys.VOICE_TITLE,          "语音");
+        adder.add(Keys.VOICE_ENABLED,        "启用");
+        adder.add(Keys.VOICE_EMPTY,          "还没有声线——点右上「新建」创建一条");
+        adder.add(Keys.VOICE_ADD,            "新建");
+        adder.add(Keys.VOICE_DELETE_CONFIRM, "删除声线「%s」?绑定它的同伴将静音。");
+        adder.add(Keys.VOICE_FORM_NAME,      "名称(必填)");
+        adder.add(Keys.VOICE_BACKEND_OPENAI,  "OpenAI 兼容");
+        adder.add(Keys.VOICE_BACKEND_SOVITS,  "GPT-SoVITS");
+        adder.add(Keys.VOICE_BACKEND_MINIMAX, "MiniMax");
+        adder.add(Keys.VOICE_BACKEND_FISH,    "Fish Audio");
+        adder.add(Keys.VOICE_FORM_URL,       "服务地址(随提供商预填,可改)");
+        adder.add(Keys.VOICE_FORM_KEY_OPENAI,  "API Key(服务商控制台创建)");
+        adder.add(Keys.VOICE_FORM_KEY_MINIMAX, "API Key(MiniMax 平台>账户管理>接口密钥)");
+        adder.add(Keys.VOICE_FORM_KEY_FISH,    "API Key(fish.audio>API 凭证页创建)");
+        adder.add(Keys.VOICE_FORM_MINIMAX_MODEL, "模型(留空即 speech-02-turbo)");
+        adder.add(Keys.VOICE_FORM_MINIMAX_VOICE, "voice_id(平台音色库复制)");
+        adder.add(Keys.VOICE_FORM_GROUP,     "GroupId(接口报错要求时必填)");
+        adder.add(Keys.VOICE_FORM_REFERENCE, "声线 reference_id(可直接粘贴声线页网址;留空用账号默认)");
+        adder.add(Keys.VOICE_FORM_FISH_MODEL, "合成模型(留空用默认;s2.1-pro-free 为免费档)");
+        adder.add(Keys.VOICE_FORM_MODEL,     "TTS 模型 id");
+        adder.add(Keys.VOICE_FORM_VOICE,     "音色(格式 模型:音色名)");
+        adder.add(Keys.VOICE_FORM_REF,       "参考音频路径(GPT-SoVITS 所在机器上)");
+        adder.add(Keys.VOICE_FORM_PROMPT,    "参考音频的文本");
+        adder.add(Keys.VOICE_FORM_LANG,      "语言(留空默认 zh)");
+        adder.add(Keys.VOICE_FORM_VOLUME,    "音量 1~10(默认 5)");
+        adder.add(Keys.VOICE_TEST,           "试听");
+        adder.add(Keys.VOICE_TEST_RUNNING,   "合成中…");
+        adder.add(Keys.VOICE_TEST_OK,        "✔ 播放中");
+        adder.add(Keys.VOICE_TEST_FAIL,      "试听失败:%s");
+        adder.add(Keys.VOICE_WARN_NAME,      "名称必填");
+        adder.add(Keys.VOICE_BIND_LABEL,     "本同伴");
+        adder.add(Keys.VOICE_BIND_NONE,      "无(静音)");
+        adder.add(Keys.VOICE_SUMMON_LABEL,   "声线");
+        adder.add(Keys.VOICE_SUMMON_EMPTY,   "(空——到 设置 → 语音 新建)");
     }
 }

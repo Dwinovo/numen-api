@@ -58,8 +58,12 @@ public final class NumenScreen extends Screen {
     private enum Tab { CHAT, ITEMS, SETTINGS }
 
     // ---- layout ----
-    private static final int PANEL_W = 380;
-    private static final int PANEL_H = 232;
+    // 面板随窗口伸缩:下限=从前的固定尺寸(小窗口下与历史布局完全一致),
+    // 上限挡住大屏上的无限变宽——行宽超过阅读舒适区就不再跟了。
+    private static final int PANEL_MIN_W = 380;
+    private static final int PANEL_MIN_H = 232;
+    private static final int PANEL_MAX_W = 520;
+    private static final int PANEL_MAX_H = 300;
     // Left companion rail (folded-in roster): one avatar per Numen, click to switch, + to summon.
     private static final int RAIL_W = 46;        // left rail column width (baked into the workspace sprite)
     private static final int RAIL_AV = 26;       // avatar tile size
@@ -123,7 +127,7 @@ public final class NumenScreen extends Screen {
     private Tab tab = Tab.CHAT;
 
     /** The Settings tab is a config hub: a left sub-nav picks one of these sections. */
-    private enum SettingsSection { PROVIDER, PROXY, MCP, SKILLS, PERSONA }
+    private enum SettingsSection { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN }
 
     // ---- model-config section state (mirrors the persona section) ----
     private boolean addingProvider;
@@ -136,6 +140,52 @@ public final class NumenScreen extends Screen {
     private ProviderDropdown provProviderDropdown;
     private Dropdown provModelDropdown;
     private boolean provCustomModel;
+
+    // ---- voice section state (mirrors the model-config section: list / form / delete-confirm) ----
+    private boolean addingVoice;
+    private String voiceEditId;
+    private String voiceDeletePending;
+    /** Form backend type (openai / gpt_sovits / minimax / fish_audio),经下拉选择,切换即换字段行。 */
+    private String wVoiceBackend = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_OPENAI;
+    private Dropdown voiceBackendDropdown;
+    /** 声线表单的垂直滚动偏移(px)——MiniMax 八行放不下,滚轮驱动。 */
+    private int voiceFormScroll;
+    private String wVoiceName = "", wVoiceUrl = "", wVoiceKey = "", wVoiceGroup = "", wVoiceModel = "",
+            wVoiceVoice = "", wVoiceRef = "", wVoicePrompt = "", wVoiceLang = "", wVoiceVolume = "5";
+    private EditBox voiceNameInput, voiceUrlInput, voiceKeyInput, voiceGroupInput, voiceModelInput,
+            voiceVoiceInput, voiceRefInput, voicePromptInput, voiceLangInput, voiceVolumeInput;
+    private static final String VOICE_NONE = "__none__";
+
+    // 皮肤库 tab(列表+表单,照声线库制式)。签名发生在保存时(MineSkin 代签),
+    // 召唤只读现成结果。
+    private boolean addingSkin;
+    private String skinEditId;
+    private String skinDeletePending;
+    private String wSkinName = "";
+    private String wSkinVariant = com.dwinovo.numen.client.skin.SkinLibrary.VARIANT_CLASSIC;
+    private EditBox skinNameInput;
+    private Dropdown skinVariantDropdown;
+    /** 拖进窗口的皮肤 png 原始字节(表单会话内;保存成功后随条目落盘)。 */
+    private byte[] skinDropped;
+    private int skinDroppedW, skinDroppedH;
+    /** 保存(签名)进行中——防重复点击;skinFormGen 作废在途回调。 */
+    private boolean skinSigning;
+    private int skinFormGen;
+    private String skinMsg;
+    private boolean skinMsgFail;
+    private long skinMsgUntil;
+    /** 召唤页的皮肤下拉:null = 默认(按名字找同名正版)。 */
+    private Dropdown summonSkinDropdown;
+    private String summonSkinId;
+    private static final String SKIN_DEFAULT = "__default__";
+
+    /** 试听/保存的状态行(表单底部;fail = 红色),照 summon 页 warnText 的即时反馈做法。 */
+    private String voiceMsg;
+    private boolean voiceMsgFail;
+    private long voiceMsgUntil;
+    /** 试听代际:再次点击/离开表单让在途合成回调作废;preview 引用用于停掉上一次试听。 */
+    private int voiceTestGen;
+    private com.dwinovo.numen.client.voice.VoicePreviewSound voicePreview;
 
     // ---- proxy section state (a dedicated tab: IP + port) ----
     private net.minecraft.client.gui.components.EditBox proxyIpInput, proxyPortInput;
@@ -154,6 +204,9 @@ public final class NumenScreen extends Screen {
     /** Provider entry for the new companion — REQUIRED (no default, no fallback). */
     private Dropdown summonProviderDropdown;
     private String summonProviderId;
+    /** Voice entry for the new companion — optional (null = silent). */
+    private Dropdown summonVoiceDropdown;
+    private String summonVoiceId;
     private static final String PERSONA_DEFAULT = "__default__";
     private int settingsScroll;   // first visible row of the MCP / skill list (wheel-scroll when long)
 
@@ -211,6 +264,7 @@ public final class NumenScreen extends Screen {
 
     // geometry resolved in init()
     private int left, top, railX;
+    private int panelW = PANEL_MIN_W, panelH = PANEL_MIN_H;   // resolved in init() from the window size
     private final int[] tabX = new int[3];   // left x of each tab label, for click hit-testing
     private final int[] tabW = new int[3];
 
@@ -261,10 +315,14 @@ public final class NumenScreen extends Screen {
 
     @Override
     protected void init() {
-        int composite = RAIL_W + PANEL_W;        // rail flush against the panel — one merged sprite
-        this.railX = (this.width - composite) / 2;
+        // 窗口留 12px 边距后能给多大给多大,夹在上下限之间;窗口比下限还小时
+        // railX/top 至少钳到 0,保证头部(标题/tab/关闭途径)永远可见可点。
+        panelW = Mth.clamp(this.width - RAIL_W - 24, PANEL_MIN_W, PANEL_MAX_W);
+        panelH = Mth.clamp(this.height - 24, PANEL_MIN_H, PANEL_MAX_H);
+        int composite = RAIL_W + panelW;        // rail flush against the panel — one merged sprite
+        this.railX = Math.max(0, (this.width - composite) / 2);
         this.left = railX + RAIL_W;
-        this.top = (this.height - PANEL_H) / 2;
+        this.top = Math.max(0, (this.height - panelH) / 2);
         layoutTabs();
         rebuild();
     }
@@ -276,7 +334,7 @@ public final class NumenScreen extends Screen {
 
     private void layoutTabs() {
         String[] labels = tabLabels();
-        int x = left + PANEL_W - PAD;
+        int x = left + panelW - PAD;
         for (int i = labels.length - 1; i >= 0; i--) {
             int w = font.width(labels[i]) + 10;
             x -= w;
@@ -300,11 +358,18 @@ public final class NumenScreen extends Screen {
         provNameInput = provModelInput = provKeyInput = provBaseUrlInput = null;
         provProviderDropdown = null;
         provModelDropdown = null;
+        voiceNameInput = voiceUrlInput = voiceKeyInput = voiceGroupInput = voiceModelInput = null;
+        voiceVoiceInput = voiceRefInput = voicePromptInput = voiceLangInput = voiceVolumeInput = null;
+        voiceBackendDropdown = null;
+        skinNameInput = null;
+        skinVariantDropdown = null;
         proxyIpInput = proxyPortInput = null;
         modelDropdown = null;
         summonInput = null;
+        summonSkinDropdown = null;
         summonPersonaDropdown = null;
         summonProviderDropdown = null;
+        summonVoiceDropdown = null;
         if (summoning) { buildSummonField(); return; }
         if (dismissPending != null) { buildDismissConfirm(); return; }
         switch (tab) {
@@ -317,11 +382,14 @@ public final class NumenScreen extends Screen {
     /** Row layout (offsets from top+HEADER_H) — each control gets its own label row,
      *  drawn in the render pass at these SAME offsets (keep the two in lockstep):
      *  8 title · 24 名字 label · 34 name field · 58 人设 label · 68 persona dropdown ·
-     *  92 模型配置 label · 102 provider dropdown · 128 buttons · 152 hint/warn. */
+     *  92 模型配置 label · 102 provider dropdown · 126 声线 label · 136 voice dropdown ·
+     *  162 buttons · 186 hint/warn. */
     private void buildSummonField() {
+        // 人设下拉的数据源是 persona/ 目录:每次打开召唤面板重扫一遍。
+        com.dwinovo.numen.persona.PersonaLibrary.instance().reload();
         int y0 = top + HEADER_H;
         summonInput = new FlatEditBox(font, left + PAD + FIELD_INSET_X, y0 + 34 + FIELD_INSET_Y,
-                PANEL_W - PAD * 2 - FIELD_INSET_X * 2, 18 - FIELD_INSET_Y * 2, Component.literal(""));
+                panelW - PAD * 2 - FIELD_INSET_X * 2, 18 - FIELD_INSET_Y * 2, Component.literal(""));
         summonInput.setMaxLength(com.dwinovo.numen.network.payload.SummonRequestPayload.MAX_NAME);
         summonInput.setBordered(false);
         summonInput.setTextColor(TXT);
@@ -336,7 +404,8 @@ public final class NumenScreen extends Screen {
             items.add(new Dropdown.Item(p.id(), p.name()));
         }
         summonPersonaDropdown = new Dropdown(items, summonPersonaId == null ? PERSONA_DEFAULT : summonPersonaId);
-        summonPersonaDropdown.setBounds(left + PAD, y0 + 68, PANEL_W - PAD * 2, 18);
+        summonPersonaDropdown.setBounds(left + PAD, y0 + 68, panelW - PAD * 2, 18);
+        summonPersonaDropdown.setDropBottom(top + panelH - 2);
         // REQUIRED model config — no default item and no fallback: an empty library
         // shows no dropdown; clicking 创建 then explains (doSummon).
         var provEntries = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list();
@@ -347,25 +416,99 @@ public final class NumenScreen extends Screen {
             }
             if (summonProviderId == null) summonProviderId = provEntries.get(0).id();
             summonProviderDropdown = new Dropdown(provItems, summonProviderId);
-            summonProviderDropdown.setBounds(left + PAD, y0 + 102, PANEL_W - PAD * 2, 18);
+            summonProviderDropdown.setBounds(left + PAD, y0 + 102, panelW - PAD * 2, 18);
+            summonProviderDropdown.setDropBottom(top + panelH - 2);
         }
+        // OPTIONAL voice — first item = 无(静音), entries follow (same pattern as the
+        // persona pick above); an empty library shows no dropdown, just a hint.
+        var voiceEntries = com.dwinovo.numen.client.voice.VoiceLibrary.instance().list();
+        if (!voiceEntries.isEmpty()) {
+            List<Dropdown.Item> voiceItems = new ArrayList<>();
+            voiceItems.add(new Dropdown.Item(VOICE_NONE, I18n.get(ModLanguageData.Keys.VOICE_BIND_NONE)));
+            for (var e : voiceEntries) {
+                voiceItems.add(new Dropdown.Item(e.id(), e.name()));
+            }
+            summonVoiceDropdown = new Dropdown(voiceItems, summonVoiceId == null ? VOICE_NONE : summonVoiceId);
+            // 声线行与皮肤下拉平分一行(左声线右皮肤),不再新占一行。
+            summonVoiceDropdown.setBounds(left + PAD, y0 + 136, summonHalfW(), 18);
+            summonVoiceDropdown.setDropBottom(top + panelH - 2);
+        }
+        // 皮肤:默认(按名字找同名正版) + 皮肤库里已签名的条目。
+        List<Dropdown.Item> skinItems = new ArrayList<>();
+        skinItems.add(new Dropdown.Item(SKIN_DEFAULT, I18n.get(ModLanguageData.Keys.SUMMON_SKIN_DEFAULT)));
+        for (var e : com.dwinovo.numen.client.skin.SkinLibrary.instance().list()) {
+            if (e.signed()) skinItems.add(new Dropdown.Item(e.id(), e.name()));
+        }
+        summonSkinDropdown = new Dropdown(skinItems, summonSkinId == null ? SKIN_DEFAULT : summonSkinId);
+        summonSkinDropdown.setBounds(left + PAD + summonHalfW() + 6, y0 + 136, summonHalfW(), 18);
+        summonSkinDropdown.setDropBottom(top + panelH - 2);
         // Explicit actions — Enter stays as the fallback confirm (keyPressed), the
         // buttons are the primary path.
         int bw = 64, gap = 8, totalW = bw * 2 + gap;
-        int bx = left + (PANEL_W - totalW) / 2;
-        add(new SimpleButton(bx, y0 + 128, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+        int bx = left + (panelW - totalW) / 2;
+        add(new SimpleButton(bx, y0 + 162, bw, 18, Component.translatable("numen.gui.settings.cancel"),
                 b -> { summoning = false; rebuild(); }));
-        add(new SimpleButton(bx + bw + gap, y0 + 128, bw, 18,
+        add(new SimpleButton(bx + bw + gap, y0 + 162, bw, 18,
                 Component.translatable(ModLanguageData.Keys.SUMMON_CREATE),
                 b -> doSummon()));
         setInitialFocus(summonInput);
+    }
+
+    /** 召唤页"声线|皮肤"共享行的半宽。build 与 render 共用。 */
+    private int summonHalfW() {
+        return (panelW - PAD * 2 - 6) / 2;
+    }
+
+    /**
+     * 召唤页四个下拉的点击路由:正展开的先吃(它的列表画在最上层,命中也必须
+     * 最优先),然后按行序。返回 true = 消费了本次点击。
+     */
+    private boolean routeSummonDropdownClick(double mx, double my) {
+        Dropdown[] all = {summonPersonaDropdown, summonProviderDropdown,
+                summonVoiceDropdown, summonSkinDropdown};
+        Dropdown open = null;
+        for (Dropdown d : all) {
+            if (d != null && d.isOpen()) { open = d; break; }
+        }
+        for (Dropdown d : (open != null ? new Dropdown[]{open} : all)) {
+            if (d == null || !d.mouseClicked(mx, my)) continue;
+            String sel = d.selectedId();
+            if (d == summonPersonaDropdown) {
+                summonPersonaId = PERSONA_DEFAULT.equals(sel) ? null : sel;
+            } else if (d == summonProviderDropdown) {
+                summonProviderId = sel;
+            } else if (d == summonVoiceDropdown) {
+                summonVoiceId = VOICE_NONE.equals(sel) ? null : sel;
+            } else {
+                summonSkinId = SKIN_DEFAULT.equals(sel) ? null : sel;
+            }
+            return true;
+        }
+        // 有列表展开时,点到列表外 = 收起并消费(mouseClicked 已处理);点到这里
+        // 说明没有任何下拉消费——放行给后面的命中。
+        return false;
+    }
+
+    /** 召唤页四个下拉的渲染:收起的先画,正展开的最后画(列表压在一切之上)。 */
+    private void renderSummonDropdowns(GuiGraphics g, int mouseX, int mouseY) {
+        Dropdown[] all = {summonSkinDropdown, summonVoiceDropdown,
+                summonProviderDropdown, summonPersonaDropdown};
+        Dropdown open = null;
+        for (Dropdown d : all) {
+            if (d == null) continue;
+            if (d.isOpen() && open == null) { open = d; continue; }
+            d.render(g, font, mouseX, mouseY);
+        }
+        if (open != null) {
+            open.render(g, font, mouseX, mouseY);
+        }
     }
 
     /** Two buttons for the "delete companion?" confirm bar — Cancel and the destructive Delete. */
     private void buildDismissConfirm() {
         UUID target = dismissPending;
         int bw = 64, gap = 8, totalW = bw * 2 + gap;
-        int bx = left + (PANEL_W - totalW) / 2;
+        int bx = left + (panelW - totalW) / 2;
         int by = top + HEADER_H + 52;
         add(new SimpleButton(bx, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
                 b -> { dismissPending = null; rebuild(); }));
@@ -426,12 +569,12 @@ public final class NumenScreen extends Screen {
 
 
     private void buildChatWidgets() {
-        int inputY = top + PANEL_H - INPUT_H - PAD;
+        int inputY = top + panelH - INPUT_H - PAD;
         int compactW = 26;
         int sendW = 42;
         int stopW = 22;
         int inX = left + PAD + compactW + 4;
-        int inW = PANEL_W - PAD * 2 - compactW - sendW - stopW - 12;
+        int inW = panelW - PAD * 2 - compactW - sendW - stopW - 12;
 
         compactButton = add(new SimpleButton(left + PAD, inputY, compactW, INPUT_H,
                 Component.literal("⤬"), b -> loop().requestCompact()));
@@ -501,16 +644,20 @@ public final class NumenScreen extends Screen {
     /** Left x of the section content area (right of the sub-nav column + divider). */
     private int secX() { return left + PAD + NAV_W + 8; }
     /** Width of the section content area. */
-    private int secW() { return PANEL_W - PAD - NAV_W - 8 - PAD; }
+    private int secW() { return panelW - PAD - NAV_W - 8 - PAD; }
     /** Top y of section content (below the header). */
     private int secY0() { return top + HEADER_H + 8; }
     /** Bottom y a list row may reach. */
-    private int secBottom() { return top + PANEL_H - PAD; }
+    private int secBottom() { return top + panelH - PAD; }
 
     private void selectSection(SettingsSection s) {
         if (s == settingsSection) return;
         settingsSection = s;
         settingsScroll = 0;
+        if (s == SettingsSection.PERSONA) {
+            // 人设是目录里的 .md 文件:进页先重扫,外部编辑器的修改即时可见。
+            PersonaLibrary.instance().reload();
+        }
         addingMcp = false;
         mcpDeletePending = null;
         mcpEditOriginal = null;
@@ -520,6 +667,14 @@ public final class NumenScreen extends Screen {
         addingProvider = false;
         providerEditId = null;
         providerDeletePending = null;
+        addingVoice = false;
+        voiceEditId = null;
+        voiceDeletePending = null;
+        voiceTestGen++;   // 离开语音表单:在途试听回调作废
+        addingSkin = false;
+        skinEditId = null;
+        skinDeletePending = null;
+        skinFormGen++;    // 离开皮肤表单:在途 MineSkin 签名回调作废
         rebuild();
     }
 
@@ -542,6 +697,16 @@ public final class NumenScreen extends Screen {
                 else if (addingProvider) buildProviderForm();
                 else buildProviderListWidgets();
             }
+            case VOICE -> {
+                if (voiceDeletePending != null) buildVoiceDeleteConfirm();
+                else if (addingVoice) buildVoiceForm();
+                else buildVoiceListWidgets();
+            }
+            case SKIN -> {
+                if (skinDeletePending != null) buildSkinDeleteConfirm();
+                else if (addingSkin) buildSkinForm();
+                else buildSkinListWidgets();
+            }
             case PROXY -> buildProxyWidgets();
         }
     }
@@ -559,7 +724,7 @@ public final class NumenScreen extends Screen {
         // One row below the section title (only two rows here — space is plentiful).
         proxyIpInput = field(x, fy + 25, w, 64, ip);
         proxyPortInput = field(x, fy + 25 + SET_SP, w, 8, port);
-        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
                 Component.translatable("numen.gui.settings.save"), b -> {
                     String i = proxyIpInput.getValue().trim();
                     String p = proxyPortInput.getValue().trim();
@@ -577,14 +742,14 @@ public final class NumenScreen extends Screen {
         txt(g, Component.translatable(ModLanguageData.Keys.SETTINGS_PROXY_IP), x, fy + 14, TXT_MUTED);
         txt(g, Component.translatable(ModLanguageData.Keys.SETTINGS_PROXY_PORT), x, fy + 14 + SET_SP, TXT_MUTED);
         if (savedFlashUntil > System.currentTimeMillis()) {
-            txt(g, Component.translatable("numen.settings.saved"), x, top + PANEL_H - PAD - 14, OK);
+            txt(g, Component.translatable("numen.settings.saved"), x, top + panelH - PAD - 14, OK);
         }
     }
 
     // ---- Provider section: the library of named LLM provider configs companions select from ----
 
     private void buildProviderListWidgets() {
-        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
                 Component.translatable(ModLanguageData.Keys.PROVIDER_ADD), b -> {
                     addingProvider = true; providerEditId = null;
                     wProvName = ""; wProvProvider = ""; wProvModel = ""; wProvKey = ""; wProvBaseUrl = "";
@@ -609,6 +774,7 @@ public final class NumenScreen extends Screen {
         }
         provProviderDropdown = new ProviderDropdown(wProvProvider, false);
         provProviderDropdown.setBounds(x, fy + 11 + SET_SP, w, 18);
+        provProviderDropdown.setDropBottom(top + panelH - 2);
         // Model row: the provider's known models as a dropdown (+ 自定义 → free text),
         // free text only for custom providers.
         ModelRegistry.Provider mp = ModelRegistry.provider(LlmProviders.normalize(wProvProvider));
@@ -626,12 +792,13 @@ public final class NumenScreen extends Screen {
             String sel = known ? wProvModel : mp.models().get(0).id();
             provModelDropdown = new Dropdown(modelItems(mp), sel);
             provModelDropdown.setBounds(x, fy + 11 + 2 * SET_SP, w, 18);
+            provModelDropdown.setDropBottom(top + panelH - 2);
         }
         provKeyInput = field(x, fy + 11 + 3 * SET_SP, w, 256, wProvKey);
         provBaseUrlInput = field(x, fy + 11 + 4 * SET_SP, w, 256, wProvBaseUrl);
-        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
                 Component.translatable("numen.gui.settings.save"), b -> onSaveProvider()));
-        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, top + panelH - PAD - 18, 18, 18,
                 Component.literal("✕"), b -> { addingProvider = false; providerEditId = null; rebuild(); }));
         setInitialFocus(provNameInput);
     }
@@ -695,10 +862,424 @@ public final class NumenScreen extends Screen {
         rebuild();
     }
 
+    // ---- Voice section: the library of named TTS voices companions bind to (mirrors the provider section) ----
+
+    /** Voice form row pitch — 7 field rows + the Save row must fit, so tighter than SET_SP
+     *  (labels ride inside the fields as placeholders instead of taking their own rows). */
+    /** 试听用的固定测试句(按当前表单参数就地合成)。 */
+    private static final String VOICE_TEST_SENTENCE = "你好,我是你的同伴,这是我的声音。";
+
+    private void buildVoiceListWidgets() {
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable(ModLanguageData.Keys.VOICE_ADD), b -> {
+                    addingVoice = true; voiceEditId = null;
+                    resetVoiceForm();
+                    rebuild();
+                }));
+        // 当前同伴的声线绑定下拉(有同伴且库非空时;首项 = 无(静音))。
+        var lib = com.dwinovo.numen.client.voice.VoiceLibrary.instance();
+        // 绑定不再是单独一行下拉:声线在召唤时选定、新建时自动绑定,列表行内的
+        // ●/○ 标记负责事后换绑(点 ○ 换用,点 ● 解绑静音)。
+    }
+
+    /**
+     * 声线表单:模型配置同款制式——每个输入框上方一行标题({@code SET_SP} 行距),
+     * 名称 → 提供商下拉 → URL(选型预填)→ 各后端专属字段 → 音量 + 试听。
+     * 行数随选型变化(MiniMax 最多 8 行),放不下的部分由 {@link #voiceFormScroll}
+     * 滚动(滚轮),出视口的行连标题带控件一起隐藏;保存/关闭钉在面板右下不随滚。
+     */
+    private void buildVoiceForm() {
+        int x = secX(), w = secW();
+        voiceFormScroll = Mth.clamp(voiceFormScroll, 0, maxVoiceFormScroll());
+        voiceNameInput = vclip(field(x, voiceVy(0), w, 48, wVoiceName), 0);
+        // 后端下拉——召唤页人设/模型下拉同款控件;点击路由在 mouseClicked,
+        // 展开列表在 render 末尾最后画(压在字段上面)。
+        voiceBackendDropdown = new Dropdown(List.of(
+                new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_OPENAI,
+                        I18n.get(ModLanguageData.Keys.VOICE_BACKEND_OPENAI)),
+                new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS,
+                        I18n.get(ModLanguageData.Keys.VOICE_BACKEND_SOVITS)),
+                new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX,
+                        I18n.get(ModLanguageData.Keys.VOICE_BACKEND_MINIMAX)),
+                new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH,
+                        I18n.get(ModLanguageData.Keys.VOICE_BACKEND_FISH))),
+                wVoiceBackend);
+        voiceBackendDropdown.setBounds(x, voiceVy(1), w, 18);
+        voiceBackendDropdown.setDropBottom(top + panelH - 2);
+        voiceUrlInput = vclip(field(x, voiceVy(2), w, 256, wVoiceUrl), 2);
+        int row = 3;
+        switch (wVoiceBackend) {
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS -> {
+                voiceRefInput = vclip(field(x, voiceVy(row), w, 256, wVoiceRef), row++);
+                voicePromptInput = vclip(field(x, voiceVy(row), w, 512, wVoicePrompt), row++);
+                voiceLangInput = vclip(field(x, voiceVy(row), w, 16, wVoiceLang), row++);
+            }
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX -> {
+                voiceKeyInput = vclip(field(x, voiceVy(row), w, 1024, wVoiceKey), row++);
+                voiceGroupInput = vclip(field(x, voiceVy(row), w, 64, wVoiceGroup), row++);
+                voiceModelInput = vclip(field(x, voiceVy(row), w, 64, wVoiceModel), row++);
+                voiceVoiceInput = vclip(field(x, voiceVy(row), w, 128, wVoiceVoice), row++);
+            }
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH -> {
+                voiceKeyInput = vclip(field(x, voiceVy(row), w, 256, wVoiceKey), row++);
+                voiceVoiceInput = vclip(field(x, voiceVy(row), w, 128, wVoiceVoice), row++);
+                voiceModelInput = vclip(field(x, voiceVy(row), w, 64, wVoiceModel), row++);
+            }
+            default -> {
+                voiceKeyInput = vclip(field(x, voiceVy(row), w, 256, wVoiceKey), row++);
+                voiceModelInput = vclip(field(x, voiceVy(row), w, 128, wVoiceModel), row++);
+                voiceVoiceInput = vclip(field(x, voiceVy(row), w, 128, wVoiceVoice), row++);
+            }
+        }
+        voiceVolumeInput = vclip(field(x, voiceVy(row), 70, 8, wVoiceVolume), row);
+        SimpleButton test = new SimpleButton(x + w - 64, voiceVy(row), 64, 18,
+                Component.translatable(ModLanguageData.Keys.VOICE_TEST), b -> onVoiceTest());
+        test.visible = voiceRowVisible(row);
+        test.active = test.visible;
+        add(test);
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> onSaveVoice()));
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, top + panelH - PAD - 18, 18, 18,
+                Component.literal("✕"), b -> {
+                    addingVoice = false; voiceEditId = null; voiceTestGen++;
+                    rebuild();
+                }));
+        if (voiceNameInput.visible) {
+            setInitialFocus(voiceNameInput);
+        }
+    }
+
+    /** 表单第 {@code row} 行输入框的 y(标题画在其上方 11px);随滚动偏移。 */
+    private int voiceVy(int row) {
+        return secY0() + 11 + row * SET_SP - voiceFormScroll;
+    }
+
+    /** 第 {@code row} 行(标题+输入框)完整落在视口内? */
+    private boolean voiceRowVisible(int row) {
+        int y = voiceVy(row);
+        return y - 11 >= secY0() - 2 && y + 18 <= voiceFormBottom();
+    }
+
+    /** 表单视口底:保存行与状态行的上沿。 */
+    private int voiceFormBottom() {
+        return top + panelH - PAD - 20;
+    }
+
+    /** 当前选型的总行数:名称/提供商/URL 三行 + 各后端专属行 + 音量行。 */
+    private int voiceFormRowCount() {
+        return com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX.equals(wVoiceBackend) ? 8 : 7;
+    }
+
+    private int maxVoiceFormScroll() {
+        int content = 11 + (voiceFormRowCount() - 1) * SET_SP + 18 + 2;
+        return Math.max(0, content - (voiceFormBottom() - secY0()));
+    }
+
+    /** 出视口的行隐藏(不可见的 EditBox 既不渲染也不接输入)。 */
+    private EditBox vclip(EditBox f, int row) {
+        boolean vis = voiceRowVisible(row);
+        f.visible = vis;
+        f.active = vis;
+        return f;
+    }
+
+    private void buildVoiceDeleteConfirm() {
+        int x = secX();
+        int by = secY0() + 24;
+        int bw = 64, gap = 8;
+        add(new SimpleButton(x, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
+            com.dwinovo.numen.client.voice.VoiceLibrary.instance().remove(voiceDeletePending);
+            voiceDeletePending = null;
+            rebuild();
+        }));
+        add(new SimpleButton(x + bw + gap, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { voiceDeletePending = null; rebuild(); }));
+    }
+
+    /** Keep typed values across a rebuild (backend switch / edit entry). */
+    private void preserveVoiceForm() {
+        if (voiceNameInput != null) wVoiceName = voiceNameInput.getValue();
+        if (voiceUrlInput != null) wVoiceUrl = voiceUrlInput.getValue();
+        if (voiceKeyInput != null) wVoiceKey = voiceKeyInput.getValue();
+        if (voiceGroupInput != null) wVoiceGroup = voiceGroupInput.getValue();
+        if (voiceModelInput != null) wVoiceModel = voiceModelInput.getValue();
+        if (voiceVoiceInput != null) wVoiceVoice = voiceVoiceInput.getValue();
+        if (voiceRefInput != null) wVoiceRef = voiceRefInput.getValue();
+        if (voicePromptInput != null) wVoicePrompt = voicePromptInput.getValue();
+        if (voiceLangInput != null) wVoiceLang = voiceLangInput.getValue();
+        if (voiceVolumeInput != null) wVoiceVolume = voiceVolumeInput.getValue();
+    }
+
+    private void resetVoiceForm() {
+        voiceFormScroll = 0;
+        wVoiceBackend = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_OPENAI;
+        wVoiceName = ""; wVoiceKey = ""; wVoiceGroup = ""; wVoiceModel = "";
+        wVoiceVoice = ""; wVoiceRef = ""; wVoicePrompt = ""; wVoiceLang = "";
+        wVoiceUrl = defaultVoiceUrl(wVoiceBackend);   // 官方端点预填,用户只补 key/音色
+        wVoiceVolume = "5";
+        voiceMsg = null;
+    }
+
+    /** 各后端的官方端点,选型即预填(后端 composeUrl 对空 URL 也回落到同一个值,
+     *  所以删空保存照样能用)。 */
+    private static String defaultVoiceUrl(String backend) {
+        return switch (backend) {
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS ->
+                    com.dwinovo.numen.client.voice.GptSovitsTts.DEFAULT_BASE;
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX ->
+                    com.dwinovo.numen.client.voice.MiniMaxTts.DEFAULT_BASE;
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH ->
+                    com.dwinovo.numen.client.voice.FishAudioTts.DEFAULT_BASE;
+            default -> com.dwinovo.numen.client.voice.OpenAiCompatibleTts.DEFAULT_BASE;
+        };
+    }
+
+    /** 当前表单(w 值)拼成一个 Entry;id 由调用方给(编辑=原 id,试听=临时)。 */
+    private com.dwinovo.numen.client.voice.VoiceLibrary.Entry formVoiceEntry(String id, String name) {
+        float vol;
+        try { vol = Float.parseFloat(wVoiceVolume.trim()); }
+        catch (NumberFormatException ex) { vol = 5.0f; }
+        // UI 档位 1~10 → 存储增益 0.2~2.0(5 档 = 原始响度 1.0,老数据无需迁移)。
+        vol = Mth.clamp(vol, 1.0f, 10.0f) / 5.0f;
+        return new com.dwinovo.numen.client.voice.VoiceLibrary.Entry(id, name,
+                wVoiceBackend,
+                wVoiceUrl.trim(), wVoiceKey.trim(), wVoiceGroup.trim(),
+                wVoiceModel.trim(), wVoiceVoice.trim(),
+                wVoiceRef.trim(), wVoicePrompt.trim(), wVoiceLang.trim(),
+                com.dwinovo.numen.client.voice.VoiceLibrary.clampVolume(vol));
+    }
+
+    private void onSaveVoice() {
+        preserveVoiceForm();
+        String name = wVoiceName.trim();
+        if (name.isEmpty()) {
+            voiceNote(I18n.get(ModLanguageData.Keys.VOICE_WARN_NAME), true);
+            return;
+        }
+        var lib = com.dwinovo.numen.client.voice.VoiceLibrary.instance();
+        if (voiceEditId != null) {
+            lib.update(formVoiceEntry(voiceEditId, name));
+        } else {
+            var e = formVoiceEntry("", name);
+            var created = lib.create(name, e.backend(), e.url(), e.apiKey(), e.groupId(), e.model(),
+                    e.voice(), e.refAudio(), e.promptText(), e.textLang(), e.volume());
+            // 从某个同伴的设置页新建 → 直接绑给它:用户的心智模型是"建声线就是给
+            // 这只配音",绑定下拉只用于换绑/多同伴共用一条声线。
+            if (uuid != null) {
+                lib.assign(uuid, created.id());
+            }
+        }
+        addingVoice = false;
+        voiceEditId = null;
+        voiceTestGen++;
+        resetVoiceForm();
+        rebuild();
+    }
+
+    /**
+     * 试听:用当前表单参数合成固定测试句,就地 2D 播放(不挂实体,
+     * {@link com.dwinovo.numen.client.voice.VoicePreviewSound} 走与 3D 语音同一条
+     * mixin 取数路径)。失败把错误人话写到表单状态行(红色),与 summon 页
+     * warnText 同样的"错误在动作处出现"做法。
+     */
+    private void onVoiceTest() {
+        preserveVoiceForm();
+        var probe = formVoiceEntry("__preview__", wVoiceName.isBlank() ? "preview" : wVoiceName.trim());
+        voiceNote(I18n.get(ModLanguageData.Keys.VOICE_TEST_RUNNING), false);
+        final int gen = ++voiceTestGen;
+        final float vol = probe.volume();
+        // 同步防线:后端构建/合成同步抛(坏 URL 曾直接崩掉渲染线程)也只落到状态行。
+        java.util.concurrent.CompletableFuture<byte[]> synth;
+        final com.dwinovo.numen.client.voice.TtsBackend backend;
+        try {
+            backend = probe.createBackend();
+            synth = backend.synthesize(VOICE_TEST_SENTENCE);
+        } catch (Exception ex) {
+            String why = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            com.dwinovo.numen.Constants.LOG.warn("[numen-voice] 试音失败(同步): {}", why);
+            voiceNote(I18n.get(ModLanguageData.Keys.VOICE_TEST_FAIL, clip(why, secW() - 10)), true);
+            return;
+        }
+        synth.whenComplete((wav, err) -> {
+            com.dwinovo.numen.client.voice.PcmAudio decoded = null;
+            Throwable failure = err;
+            if (err == null) {
+                try {
+                    decoded = com.dwinovo.numen.client.voice.WavCodec.decode(wav).amplified(vol);
+                } catch (Exception ex) {
+                    failure = ex;
+                }
+            }
+            final var audio = decoded;
+            final Throwable fail = failure;
+            Minecraft.getInstance().execute(() -> {
+                if (gen != voiceTestGen) return;   // 表单已离开/又点了一次:作废
+                if (fail != null) {
+                    Throwable cur = fail;
+                    while (cur.getCause() != null && cur != cur.getCause()) cur = cur.getCause();
+                    String why = cur.getMessage() == null ? cur.getClass().getSimpleName() : cur.getMessage();
+                    // 完整原因进日志(红字被 clip 且只停留几秒,排障全靠这行)。
+                    com.dwinovo.numen.Constants.LOG.warn("[numen-voice] 试音失败({}): {}",
+                            backend.describe(), why);
+                    voiceNote(I18n.get(ModLanguageData.Keys.VOICE_TEST_FAIL, clip(why, secW() - 10)), true);
+                    return;
+                }
+                var sm = Minecraft.getInstance().getSoundManager();
+                if (voicePreview != null) sm.stop(voicePreview);   // 重听:停掉上一句
+                voicePreview = Services.VOICE.previewVoice(audio, 1.0f);   // 响度已烙进 PCM;平台工厂:取数机制两侧不同
+                sm.play(voicePreview);
+                voiceNote(I18n.get(ModLanguageData.Keys.VOICE_TEST_OK), false);
+            });
+        });
+    }
+
+    private void voiceNote(String msg, boolean fail) {
+        voiceMsg = msg;
+        voiceMsgFail = fail;
+        // 失败信息多停一会儿——HTTP 错误原文读一遍不止 5 秒。
+        voiceMsgUntil = System.currentTimeMillis() + (fail ? 12000 : 5000);
+    }
+
+    private void renderVoiceSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        var lib = com.dwinovo.numen.client.voice.VoiceLibrary.instance();
+        if (!addingVoice) {
+            txt(g, Component.translatable(ModLanguageData.Keys.VOICE_TITLE), x, secY0() - 2, TXT);
+        }
+        if (voiceDeletePending != null) {
+            var e = lib.get(voiceDeletePending);
+            txt(g, Component.translatable(ModLanguageData.Keys.VOICE_DELETE_CONFIRM, e != null ? e.name() : ""),
+                    x, secY0() + 10, TXT);
+            return;
+        }
+        if (addingVoice) {
+            // 表单本体是占位符自述的字段 + 自标注的类型按钮;这里只画状态行。
+            if (voiceMsg != null && voiceMsgUntil > System.currentTimeMillis()) {
+                txt(g, Component.literal(clip(voiceMsg, w - 94)), x, top + panelH - PAD - 14,
+                        voiceMsgFail ? FAIL : OK);
+            }
+            return;
+        }
+        // 列表视图:全局总开关(标题行右侧,新建按钮左边)。
+        int togX = x + w - 64 - 10 - TOG_W;
+        String onLabel = I18n.get(ModLanguageData.Keys.VOICE_ENABLED);
+        txt(g, Component.literal(onLabel), togX - font.width(onLabel) - 4, secY0() - 1, TXT_MUTED);
+        drawToggle(g, togX, secY0() - 2, lib.enabled());
+        var list = lib.list();
+        if (list.isEmpty()) {
+            txt(g, Component.translatable(ModLanguageData.Keys.VOICE_EMPTY), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = voiceListY0();
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        String bound = uuid != null ? lib.assignedEntry(uuid) : null;
+        for (int i = settingsScroll; i < list.size(); i++) {
+            int ry = listY0 + (i - settingsScroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            int tx = x;
+            if (uuid != null) {
+                // 行首 ● = 本同伴正在用的声线(召唤时选定/新建时自动绑定)。只读标记,
+                // 用户裁决:声线在开始时选好即可,不提供事后换绑。
+                if (e.id().equals(bound)) {
+                    txt(g, Component.literal("●"), x, ry + 6, CTA);
+                }
+                tx = x + 12;
+            }
+            txt(g, Component.literal(e.name()), tx, ry + 1, TXT);
+            String detail;
+            if (e.isSovits()) detail = nb(e.refAudio()) ? e.refAudio() : "?";
+            else if (e.isMiniMax()) detail = nb(e.voice()) ? e.voice() : "?";
+            else if (e.isFishAudio()) detail = nb(e.voice()) ? e.voice() : "?";
+            else detail = nb(e.model()) ? e.model() : "?";
+            String meta = (nb(e.backend()) ? e.backend() : "openai") + " · " + detail
+                    + " · vol " + Math.round(e.volume() * 5.0f);
+            txt(g, Component.literal(clip(meta, w - 30 - (tx - x))), tx, ry + 11, TXT_FAINT);
+            txt(g, Component.literal("✎"), editX, ry + 6,
+                    overDelete(mouseX, mouseY, editX, ry) ? CTA : TXT_FAINT);
+            txt(g, Component.literal("✕"), delX, ry + 6,
+                    overDelete(mouseX, mouseY, delX, ry) ? FAIL : TXT_FAINT);
+        }
+    }
+
+    /** 声线列表首行的 y。 */
+    private int voiceListY0() {
+        return secY0() + 14;
+    }
+
+    private boolean voiceClick(int mx, int my) {
+        if (addingVoice || voiceDeletePending != null) return false;
+        int x = secX(), w = secW();
+        var lib = com.dwinovo.numen.client.voice.VoiceLibrary.instance();
+        // 全局总开关。
+        int togX = x + w - 64 - 10 - TOG_W;
+        if (overToggle(mx, my, togX, secY0() - 2)) {
+            lib.setEnabled(!lib.enabled());
+            return true;
+        }
+        var list = lib.list();
+        int listY0 = voiceListY0();
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = scroll; i < list.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            if (overDelete(mx, my, editX, ry)) { beginEditVoice(e); return true; }
+            if (overDelete(mx, my, delX, ry)) { voiceDeletePending = e.id(); rebuild(); return true; }
+            if (overRow(mx, my, x, w, ry)) { beginEditVoice(e); return true; }
+        }
+        return false;
+    }
+
+    private void beginEditVoice(com.dwinovo.numen.client.voice.VoiceLibrary.Entry e) {
+        addingVoice = true;
+        voiceFormScroll = 0;
+        voiceEditId = e.id();
+        wVoiceBackend = normalizeVoiceBackend(e.backend());
+        wVoiceName = nv(e.name());
+        wVoiceUrl = nv(e.url());
+        wVoiceKey = nv(e.apiKey());
+        wVoiceGroup = nv(e.groupId());
+        wVoiceModel = nv(e.model());
+        wVoiceVoice = nv(e.voice());
+        wVoiceRef = nv(e.refAudio());
+        wVoicePrompt = nv(e.promptText());
+        wVoiceLang = nv(e.textLang());
+        // 存储的是增益(0.2~2.0),表单显示 1~10 档。
+        wVoiceVolume = String.valueOf(Math.round(Mth.clamp(e.volume(), 0.2f, 2.0f) * 5.0f));
+        voiceMsg = null;
+        rebuild();
+    }
+
+    private static String nv(String s) {
+        return s == null ? "" : s;
+    }
+
+    /** 存储里的 backend 串归一到下拉的四个已知 id(未知/留空按 openai)。 */
+    private static String normalizeVoiceBackend(String backend) {
+        String b = backend == null ? "" : backend.toLowerCase(java.util.Locale.ROOT).strip();
+        return switch (b) {
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS,
+                 com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX,
+                 com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH -> b;
+            default -> com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_OPENAI;
+        };
+    }
+
     // ---- Persona section: a library of reusable personas; apply one to the active companion ----
 
     private void buildPersonaListWidgets() {
-        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+        // ↻ 刷新:重扫 persona/ 目录——外部编辑器改完 md 不用重开面板。
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, secY0() - 2, 18, 14,
+                Component.literal("↻"), b -> {
+                    PersonaLibrary.instance().reload();
+                    rebuild();
+                }));
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
                 Component.translatable("numen.persona.add"), b -> {
                     addingPersona = true; personaEditId = null;
                     wPersonaName = ""; wPersonaText = "";
@@ -709,20 +1290,19 @@ public final class NumenScreen extends Screen {
     private void buildPersonaForm() {
         int x = secX(), w = secW();
         int fy = secY0() + 14;
+        // 名称即文件名;正文(自由 MD)占满剩余高度。
         personaNameInput = field(x, fy + 11, w, 48, wPersonaName);
-        // Roomy multi-line editor for the persona description (a paragraph, not one line): from below the
-        // name field down to just above the Save row.
         int ty = fy + 44;
-        int th = (top + PANEL_H - PAD - 22) - ty;
+        int th = (top + panelH - PAD - 22) - ty;
         personaTextArea = new net.minecraft.client.gui.components.MultiLineEditBox(
                 font, x, ty, w, th,
                 Component.translatable("numen.persona.text_placeholder"), Component.empty());
         personaTextArea.setValue(wPersonaText);
         personaTextArea.setCharacterLimit(4096);
         add(personaTextArea);
-        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
                 Component.translatable("numen.gui.settings.save"), b -> onSavePersona()));
-        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, top + panelH - PAD - 18, 18, 18,
                 Component.literal("✕"), b -> { addingPersona = false; personaEditId = null; rebuild(); }));
         setInitialFocus(personaNameInput);
     }
@@ -748,15 +1328,16 @@ public final class NumenScreen extends Screen {
         if (personaEditId != null) {
             PersonaLibrary.Persona old = lib.get(personaEditId);
             String oldName = old != null ? old.name() : null;
-            lib.update(personaEditId, name, text);
-            // Propagate the edit to any loaded companion currently using this persona: a live switch with
-            // a reconciliation message (match by library id, or by the old name for pre-id companions).
-            for (UUID cu : AgentLoopRegistry.loadedEntityUuids()) {
-                EntityAgentLoop l = AgentLoopRegistry.get(cu).orElse(null);
-                if (l == null) continue;
-                boolean uses = personaEditId.equals(l.personaId())
-                        || (l.personaId() == null && oldName != null && oldName.equals(l.personaName()));
-                if (uses) l.setPersona(personaEditId, text, name);
+            // 改名会换文件名(id 随之更换),传播用落盘后的新条目。
+            PersonaLibrary.Persona saved = lib.update(personaEditId, name, text);
+            if (saved != null) {
+                for (UUID cu : AgentLoopRegistry.loadedEntityUuids()) {
+                    EntityAgentLoop l = AgentLoopRegistry.get(cu).orElse(null);
+                    if (l == null) continue;
+                    boolean uses = personaEditId.equals(l.personaId())
+                            || (l.personaId() == null && oldName != null && oldName.equals(l.personaName()));
+                    if (uses) l.setPersona(saved.id(), saved.text(), saved.name());
+                }
             }
         } else {
             lib.create(name, text);
@@ -782,7 +1363,7 @@ public final class NumenScreen extends Screen {
 
     private void buildMcpListWidgets() {
         // "add server" affordance, top-right of the section.
-        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
                 Component.translatable("numen.mcp.add"), b -> {
                     addingMcp = true; mcpEditOriginal = null;                 // fresh add — not editing
                     wMcpName = ""; wMcpTarget = ""; wMcpHeader = ""; mcpStdio = false;
@@ -803,9 +1384,9 @@ public final class NumenScreen extends Screen {
         // 4th field: HTTP → request header(s) "Name: Value"; stdio → env "KEY=value" (';'-separated).
         mcpHeaderInput = field(x, fy + 100, w, 1024, wMcpHeader);
         // Save + Cancel
-        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18, 64, 18,
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
                 Component.translatable("numen.gui.settings.save"), b -> onSaveMcp()));
-        add(new SimpleButton(left + PANEL_W - PAD - 64 - 22, top + PANEL_H - PAD - 18, 18, 18,
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, top + panelH - PAD - 18, 18, 18,
                 Component.literal("✕"), b -> { addingMcp = false; mcpEditOriginal = null; rebuild(); }));
         setInitialFocus(mcpNameInput);   // ready to type the name immediately
     }
@@ -877,7 +1458,7 @@ public final class NumenScreen extends Screen {
 
     private void buildSkillsWidgets() {
         // "open skills folder" affordance, top-right of the section.
-        add(new SimpleButton(left + PANEL_W - PAD - 64, secY0() - 2, 64, 14,
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
                 Component.translatable("numen.skill.open_dir"), b -> openSkillsFolder()));
     }
 
@@ -916,16 +1497,17 @@ public final class NumenScreen extends Screen {
         } else {
             providerDropdown = new ProviderDropdown(wProvider, true);   // live + "+ 添加站点"
             providerDropdown.setBounds(x, y0 + 11, w, 18);
+            providerDropdown.setDropBottom(top + panelH - 2);
             buildApiKeyRow(x, y0 + SET_SP + 11, w);
             buildModelRow(x, y0 + 2 * SET_SP + 11, w);
             baseUrlInput = field(x, y0 + 3 * SET_SP + 11, w, 256, wBaseUrl);
             proxyInput = field(x, y0 + 4 * SET_SP + 11, w, 128, wProxy);
             // Reasoning/thinking effort cycle — a compact button in the bottom band, left of Save.
-            add(new SimpleButton(x, top + PANEL_H - PAD - 18, 118, 18, reasoningLabel(),
+            add(new SimpleButton(x, top + panelH - PAD - 18, 118, 18, reasoningLabel(),
                     b -> { cycleReasoning(); b.setMessage(reasoningLabel()); }));
         }
 
-        add(new SimpleButton(left + PANEL_W - PAD - 64, top + PANEL_H - PAD - 18,
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18,
                 64, 18, Component.translatable("numen.gui.settings.save"), b -> onSaveSettings()));
     }
 
@@ -964,6 +1546,7 @@ public final class NumenScreen extends Screen {
                     : (mp != null && !mp.models().isEmpty() ? mp.models().get(0).id() : CUSTOM_MODEL);
             modelDropdown = new Dropdown(modelItems(mp), sel);
             modelDropdown.setBounds(x, y, w, 18);
+            modelDropdown.setDropBottom(top + panelH - 2);
         }
     }
 
@@ -976,8 +1559,291 @@ public final class NumenScreen extends Screen {
 
     /** Shadowless placeholder for an empty, unfocused field — the EditBox's own hint renders with a shadow. */
     private void placeholder(GuiGraphics g, EditBox f, String text) {
-        if (f != null && f.getValue().isEmpty() && !f.isFocused() && text != null && !text.isEmpty()) {
+        if (f != null && f.visible && f.getValue().isEmpty() && !f.isFocused()
+                && text != null && !text.isEmpty()) {
             txt(g, Component.literal(text), f.getX(), f.getY(), TXT_FAINT);
+        }
+    }
+
+    /** 声线表单的行标题:画在该行输入框上方(随滚动偏移,出视口不画)。 */
+    private void voiceLabel(GuiGraphics g, int row, String text) {
+        if (!voiceRowVisible(row)) return;
+        txt(g, Component.literal(text), secX(), voiceVy(row) - 11, TXT_MUTED);
+    }
+
+    // ---- Skin section: the named skin library (upload png → MineSkin-signed textures) ----
+
+    private void buildSkinListWidgets() {
+        add(new SimpleButton(left + panelW - PAD - 64, secY0() - 2, 64, 14,
+                Component.translatable(ModLanguageData.Keys.SKIN_ADD), b -> {
+                    addingSkin = true;
+                    skinEditId = null;
+                    resetSkinForm();
+                    rebuild();
+                }));
+    }
+
+    /**
+     * 皮肤表单:名称 + 手臂模型下拉 + 拖拽提示区(png 从系统里拖进游戏窗口,
+     * {@link #onFilesDrop} 接住)。保存 = 先 MineSkin 代签再落库,失败红字可重试。
+     */
+    private void buildSkinForm() {
+        int x = secX(), w = secW();
+        int fy = secY0();
+        skinNameInput = field(x, fy + 11, w, 48, wSkinName);
+        skinVariantDropdown = new Dropdown(List.of(
+                new Dropdown.Item(com.dwinovo.numen.client.skin.SkinLibrary.VARIANT_CLASSIC,
+                        I18n.get(ModLanguageData.Keys.SKIN_VARIANT_CLASSIC)),
+                new Dropdown.Item(com.dwinovo.numen.client.skin.SkinLibrary.VARIANT_SLIM,
+                        I18n.get(ModLanguageData.Keys.SKIN_VARIANT_SLIM))),
+                wSkinVariant);
+        skinVariantDropdown.setBounds(x, fy + 11 + SET_SP, w, 18);
+        skinVariantDropdown.setDropBottom(top + panelH - 2);
+        add(new SimpleButton(left + panelW - PAD - 64, top + panelH - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> onSaveSkin()));
+        add(new SimpleButton(left + panelW - PAD - 64 - 22, top + panelH - PAD - 18, 18, 18,
+                Component.literal("✕"), b -> {
+                    addingSkin = false;
+                    skinEditId = null;
+                    skinFormGen++;
+                    rebuild();
+                }));
+        setInitialFocus(skinNameInput);
+    }
+
+    private void buildSkinDeleteConfirm() {
+        int x = secX();
+        int by = secY0() + 24;
+        int bw = 64, gap = 8;
+        add(new SimpleButton(x, by, bw, 18, Component.translatable("numen.dismiss.delete"), b -> {
+            com.dwinovo.numen.client.skin.SkinLibrary.instance().remove(skinDeletePending);
+            skinDeletePending = null;
+            rebuild();
+        }));
+        add(new SimpleButton(x + bw + gap, by, bw, 18, Component.translatable("numen.gui.settings.cancel"),
+                b -> { skinDeletePending = null; rebuild(); }));
+    }
+
+    private void resetSkinForm() {
+        wSkinName = "";
+        wSkinVariant = com.dwinovo.numen.client.skin.SkinLibrary.VARIANT_CLASSIC;
+        skinDropped = null;
+        skinDroppedW = skinDroppedH = 0;
+        skinSigning = false;
+        skinMsg = null;
+        skinFormGen++;
+    }
+
+    private void beginEditSkin(com.dwinovo.numen.client.skin.SkinLibrary.Entry e) {
+        addingSkin = true;
+        skinEditId = e.id();
+        wSkinName = e.name();
+        wSkinVariant = e.variant();
+        skinDropped = null;   // 不换图时沿用落盘原图(改手臂模型重签也从盘上读)
+        skinDroppedW = skinDroppedH = 0;
+        skinSigning = false;
+        skinMsg = null;
+        skinFormGen++;
+        rebuild();
+    }
+
+    /**
+     * 保存 = 签名 + 落库。需要重签的情形:新图、或手臂模型变了(variant 编码在
+     * 签名数据里);仅改名直接落库。签名在 MineSkin 排队,期间禁止重复点击。
+     */
+    private void onSaveSkin() {
+        if (skinSigning) return;
+        if (skinNameInput != null) wSkinName = skinNameInput.getValue();
+        String name = wSkinName.trim();
+        if (name.isEmpty()) {
+            skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_NAME), true);
+            return;
+        }
+        var lib = com.dwinovo.numen.client.skin.SkinLibrary.instance();
+        var old = skinEditId != null ? lib.get(skinEditId) : null;
+        byte[] png = skinDropped;
+        boolean needSign = png != null || old == null || !old.variant().equals(wSkinVariant)
+                || !old.signed();
+        if (needSign && png == null) {
+            if (old != null) {
+                try {
+                    png = java.nio.file.Files.readAllBytes(lib.pngPath(old.id()));
+                } catch (java.io.IOException ex) {
+                    png = null;
+                }
+            }
+            if (png == null) {
+                skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_IMAGE), true);
+                return;
+            }
+        }
+        String id = old != null ? old.id() : lib.freshId();
+        if (!needSign) {
+            lib.put(new com.dwinovo.numen.client.skin.SkinLibrary.Entry(
+                    id, name, wSkinVariant, old.value(), old.signature()), null);
+            addingSkin = false;
+            skinEditId = null;
+            rebuild();
+            return;
+        }
+        skinSigning = true;
+        skinNote(I18n.get(ModLanguageData.Keys.SKIN_SIGNING), false);
+        final int gen = ++skinFormGen;
+        final byte[] fPng = png;
+        final String fVariant = wSkinVariant;
+        com.dwinovo.numen.client.skin.MineSkinClient.generate(fPng, fVariant, name)
+                .whenComplete((signed, err) -> Minecraft.getInstance().execute(() -> {
+                    if (gen != skinFormGen) return;   // 表单已离开/重开:作废
+                    skinSigning = false;
+                    if (err != null || signed == null) {
+                        Throwable cur = err;
+                        while (cur != null && cur.getCause() != null && cur != cur.getCause()) {
+                            cur = cur.getCause();
+                        }
+                        String why = cur == null ? "?" : (cur.getMessage() == null
+                                ? cur.getClass().getSimpleName() : cur.getMessage());
+                        com.dwinovo.numen.Constants.LOG.warn("[numen-skin] MineSkin 签名失败: {}", why);
+                        skinNote(I18n.get(ModLanguageData.Keys.SKIN_SIGN_FAIL, clip(why, secW() - 10)), true);
+                        return;
+                    }
+                    com.dwinovo.numen.Constants.LOG.info("[numen-skin] MineSkin 签名成功: {}", name);
+                    com.dwinovo.numen.client.skin.SkinLibrary.instance().put(
+                            new com.dwinovo.numen.client.skin.SkinLibrary.Entry(
+                                    id, name, fVariant, signed.value(), signed.signature()),
+                            fPng);
+                    addingSkin = false;
+                    skinEditId = null;
+                    rebuild();
+                }));
+    }
+
+    private void skinNote(String msg, boolean fail) {
+        skinMsg = msg;
+        skinMsgFail = fail;
+        skinMsgUntil = System.currentTimeMillis() + (fail ? 12000 : 60000);   // 签名中的提示常驻到结果
+    }
+
+    private void renderSkinSection(GuiGraphics g, int mouseX, int mouseY) {
+        int x = secX(), w = secW();
+        var lib = com.dwinovo.numen.client.skin.SkinLibrary.instance();
+        if (!addingSkin) {
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_TITLE), x, secY0() - 2, TXT);
+        }
+        if (skinDeletePending != null) {
+            var e = lib.get(skinDeletePending);
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_DELETE_CONFIRM,
+                    e != null ? e.name() : ""), x, secY0() + 10, TXT);
+            return;
+        }
+        if (addingSkin) {
+            int fy = secY0();
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_FORM_NAME), x, fy, TXT_MUTED);
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_FORM_VARIANT), x, fy + SET_SP, TXT_MUTED);
+            // 拖拽区:提示文字 + 已加载状态(新图优先;编辑态没换图就提示沿用原图)。
+            int dy = fy + 2 * SET_SP + 4;
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_DROP_HINT), x, dy, TXT_FAINT);
+            if (skinDropped != null) {
+                txt(g, Component.translatable(ModLanguageData.Keys.SKIN_LOADED,
+                        skinDroppedW + "x" + skinDroppedH), x, dy + 12, OK);
+            } else if (skinEditId != null) {
+                txt(g, Component.translatable(ModLanguageData.Keys.SKIN_KEEP_OLD), x, dy + 12, TXT_FAINT);
+            }
+            if (skinMsg != null && skinMsgUntil > System.currentTimeMillis()) {
+                txt(g, Component.literal(clip(skinMsg, w - 94)), x, top + panelH - PAD - 14,
+                        skinMsgFail ? FAIL : OK);
+            }
+            // 手臂模型下拉最后画(展开列表压在下方文字上)。
+            if (skinVariantDropdown != null) {
+                skinVariantDropdown.render(g, font, mouseX, mouseY);
+            }
+            return;
+        }
+        var list = lib.list();
+        if (list.isEmpty()) {
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_EMPTY), x, secY0() + 16, TXT_FAINT);
+            return;
+        }
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = settingsScroll; i < list.size(); i++) {
+            int ry = listY0 + (i - settingsScroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            var face = com.dwinovo.numen.client.skin.SkinTextures.faceOf(e.id(), lib.pngPath(e.id()));
+            if (face != null) {
+                net.minecraft.client.gui.components.PlayerFaceRenderer.draw(g, face, x, ry + 1, 16);
+            }
+            int tx = x + 20;
+            txt(g, Component.literal(e.name()), tx, ry + 1, TXT);
+            String meta = I18n.get(com.dwinovo.numen.client.skin.SkinLibrary.VARIANT_SLIM.equals(e.variant())
+                    ? ModLanguageData.Keys.SKIN_VARIANT_SLIM : ModLanguageData.Keys.SKIN_VARIANT_CLASSIC)
+                    + " · " + I18n.get(e.signed() ? ModLanguageData.Keys.SKIN_SIGNED
+                            : ModLanguageData.Keys.SKIN_UNSIGNED);
+            txt(g, Component.literal(clip(meta, w - 50)), tx, ry + 11, e.signed() ? TXT_FAINT : FAIL);
+            txt(g, Component.literal("✎"), editX, ry + 6,
+                    overDelete(mouseX, mouseY, editX, ry) ? CTA : TXT_FAINT);
+            txt(g, Component.literal("✕"), delX, ry + 6,
+                    overDelete(mouseX, mouseY, delX, ry) ? FAIL : TXT_FAINT);
+        }
+    }
+
+    private boolean skinClick(int mx, int my) {
+        if (skinDeletePending != null) return false;
+        if (addingSkin) {
+            // 手臂模型下拉先于其它命中(展开列表覆盖在表单文字上)。
+            if (skinVariantDropdown != null && skinVariantDropdown.mouseClicked(mx, my)) {
+                wSkinVariant = skinVariantDropdown.selectedId();
+                return true;
+            }
+            return false;
+        }
+        int x = secX(), w = secW();
+        var lib = com.dwinovo.numen.client.skin.SkinLibrary.instance();
+        var list = lib.list();
+        int listY0 = secY0() + 14;
+        int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
+        int scroll = Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        for (int i = scroll; i < list.size(); i++) {
+            int ry = listY0 + (i - scroll) * LIST_ROW;
+            if (ry + LIST_ROW > secBottom()) break;
+            var e = list.get(i);
+            int delX = x + w - 12, editX = x + w - 26;
+            if (overDelete(mx, my, editX, ry)) { beginEditSkin(e); return true; }
+            if (overDelete(mx, my, delX, ry)) { skinDeletePending = e.id(); rebuild(); return true; }
+            if (overRow(mx, my, x, w, ry)) { beginEditSkin(e); return true; }
+        }
+        return false;
+    }
+
+    /** 皮肤 png 从系统拖进游戏窗口(表单打开时)。64×64 或旧版 64×32。 */
+    @Override
+    public void onFilesDrop(List<java.nio.file.Path> paths) {
+        if (!(tab == Tab.SETTINGS && settingsSection == SettingsSection.SKIN && addingSkin)) return;
+        for (java.nio.file.Path p : paths) {
+            if (!p.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) continue;
+            try {
+                byte[] bytes = java.nio.file.Files.readAllBytes(p);
+                try (var img = com.mojang.blaze3d.platform.NativeImage.read(
+                        new java.io.ByteArrayInputStream(bytes))) {
+                    int iw = img.getWidth(), ih = img.getHeight();
+                    if (iw != 64 || (ih != 64 && ih != 32)) {
+                        skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_SIZE, iw + "x" + ih), true);
+                        return;
+                    }
+                    if (skinNameInput != null) wSkinName = skinNameInput.getValue();
+                    skinDropped = bytes;
+                    skinDroppedW = iw;
+                    skinDroppedH = ih;
+                    skinNote(I18n.get(ModLanguageData.Keys.SKIN_LOADED, iw + "x" + ih), false);
+                    return;
+                }
+            } catch (java.io.IOException | RuntimeException ex) {
+                skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_READ, ex.getMessage() == null
+                        ? ex.getClass().getSimpleName() : ex.getMessage()), true);
+                return;
+            }
         }
     }
 
@@ -1065,6 +1931,8 @@ public final class NumenScreen extends Screen {
             case SKILLS -> renderSkillsSection(g, mouseX, mouseY);
             case PERSONA -> renderPersonaSection(g, mouseX, mouseY);
             case PROVIDER -> renderProviderSection(g, mouseX, mouseY);
+            case VOICE -> renderVoiceSection(g, mouseX, mouseY);
+            case SKIN -> renderSkinSection(g, mouseX, mouseY);
             case PROXY -> renderProxySection(g);
         }
     }
@@ -1162,7 +2030,9 @@ public final class NumenScreen extends Screen {
         String[] labels = {
                 I18n.get(ModLanguageData.Keys.PROVIDER_TITLE), I18n.get("numen.settings.proxy"),
                 I18n.get("numen.settings.nav.mcp"),
-                I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona")};
+                I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona"),
+                I18n.get(ModLanguageData.Keys.VOICE_TITLE),
+                I18n.get(ModLanguageData.Keys.SKIN_TITLE)};
         int navX = left + PAD;
         int y = secY0();
         for (int i = 0; i < labels.length; i++) {
@@ -1195,7 +2065,7 @@ public final class NumenScreen extends Screen {
             txt(g, Component.translatable("numen.settings.proxy"), x, y0 + 4 * SET_SP, TXT_MUTED);
         }
         if (savedFlashUntil > System.currentTimeMillis()) {
-            txt(g, Component.translatable("numen.settings.saved"), x, top + PANEL_H - PAD - 14, OK);
+            txt(g, Component.translatable("numen.settings.saved"), x, top + panelH - PAD - 14, OK);
         }
         // the dropdowns themselves render in render, AFTER the widgets (open list on top)
     }
@@ -1325,38 +2195,16 @@ public final class NumenScreen extends Screen {
         }
     }
 
-    private static final java.util.regex.Pattern QUERY_PAT =
-            java.util.regex.Pattern.compile("(?s)<query>(.*?)</query>");
-
-    /**
-     * The owner's own words from a user message, for display. New messages wrap the owner's text in
-     * {@code <query>…</query>} (see {@code EntityAgentLoop.submitPrompt}), so we show only that; legacy
-     * untagged messages fall back to the raw text with injected directives stripped. Display-only — the
-     * LLM still receives the full user message.
-     */
+    /** 显示过滤统一走 {@link com.dwinovo.numen.client.chat.ChatDisplayFilter}(可整体切换)。 */
     private static String ownerText(String s) {
-        if (s == null) return "";
-        java.util.regex.Matcher m = QUERY_PAT.matcher(s);
-        StringBuilder b = new StringBuilder();
-        while (m.find()) {
-            if (b.length() > 0) b.append('\n');
-            b.append(m.group(1));
-        }
-        if (b.length() > 0) return b.toString().strip();
-        return stripInjectedDirectives(s);   // legacy / untagged owner message
+        return com.dwinovo.numen.client.chat.ChatDisplayFilters.current().filterUserMessage(s);
     }
 
-    /**
-     * Strip numen-injected directive blocks ({@code <persona-change>…</persona-change>},
-     * {@code <event …>…</event>}) from a user message so only the owner's own words show in chat.
-     * The full message (directives included) is still what the LLM receives — this is display-only.
-     */
-    private static String stripInjectedDirectives(String s) {
-        if (s == null) return "";
-        String out = s.replaceAll("(?s)<persona-change>.*?</persona-change>", "")
-                .replaceAll("(?s)<event\\b[^>]*>.*?</event>", "")
-                .replaceAll("(?s)<event\\b[^>]*/>", "");
-        return out.strip();
+    /** token 数的人读格式:1350 → "1.4k",132400 → "132.4k",1_200_000 → "1.2m"。 */
+    private static String fmtTokens(long n) {
+        if (n >= 1_000_000) return String.format("%.1fm", n / 1_000_000.0);
+        if (n >= 1_000) return String.format("%.1fk", n / 1_000.0);
+        return String.valueOf(n);
     }
 
     /** Truncate {@code s} with an ellipsis so it fits in {@code maxW} px. */
@@ -1375,10 +2223,12 @@ public final class NumenScreen extends Screen {
     private static final int TOG_W = 18, TOG_H = 10;
 
     private void drawToggle(GuiGraphics g, int x, int y, boolean on) {
-        g.fill(x, y, x + TOG_W, y + TOG_H, on ? CTA : FIELD);
+        // 轨道恒中性,状态全由滑块表达:开 = 黄色滑块在右,关 = 暗滑块在左。
+        // (旧画法开着时整条轨道变黄,黄色大块压在左侧,读起来像"滑块在左"。)
+        g.fill(x, y, x + TOG_W, y + TOG_H, FIELD);
         Nb.border(g, x, y, TOG_W, TOG_H, 1, BORDER);
         int knobX = on ? x + TOG_W - 8 : x + 1;
-        g.fill(knobX, y + 1, knobX + 7, y + TOG_H - 1, ON_CTA);
+        g.fill(knobX, y + 1, knobX + 7, y + TOG_H - 1, on ? CTA : TXT_FAINT);
     }
 
     private boolean overToggle(int mx, int my, int x, int y) {
@@ -1406,6 +2256,8 @@ public final class NumenScreen extends Screen {
         if (settingsSection == SettingsSection.SKILLS) return skillToggleClick(mx, my);
         if (settingsSection == SettingsSection.PERSONA) return personaClick(mx, my);
         if (settingsSection == SettingsSection.PROVIDER) return providerClick(mx, my);
+        if (settingsSection == SettingsSection.VOICE) return voiceClick(mx, my);
+        if (settingsSection == SettingsSection.SKIN) return skinClick(mx, my);
         return false;
     }
 
@@ -1650,13 +2502,33 @@ public final class NumenScreen extends Screen {
             warnUntil = System.currentTimeMillis() + 4000;
             return;
         }
+        // 名字限定 Minecraft 官方命名规则(3~16 位英文/数字/下划线)——中文名在玩家系统
+        // 各处容易出错,而且名字同时就是皮肤来源:同名正版玩家的皮肤会自动穿上。
+        if (!n.matches("[A-Za-z0-9_]{3,16}")) {
+            warnText = I18n.get(ModLanguageData.Keys.SUMMON_WARN_NAME_FORMAT);
+            warnUntil = System.currentTimeMillis() + 4000;
+            return;
+        }
         // Remember the picks by name; CompanionListPayload applies them when the new companion arrives.
         if (summonPersonaId != null) com.dwinovo.numen.persona.PersonaLibrary.pendSummon(n, summonPersonaId);
         com.dwinovo.numen.agent.llm.ProviderLibrary.pendSummon(n, summonProviderId);
-        Services.NETWORK.sendToServer(new com.dwinovo.numen.network.payload.SummonRequestPayload(n));
+        if (summonVoiceId != null) com.dwinovo.numen.client.voice.VoiceLibrary.pendSummon(n, summonVoiceId);
+        // 自定义皮肤:库里存好的 Mojang 签名数据随包捎给服务端(自验证,伪造不了);
+        // 没选就留空,服务端按名字找同名正版皮肤。
+        String skinValue = "", skinSig = "";
+        var skinEntry = com.dwinovo.numen.client.skin.SkinLibrary.instance().get(summonSkinId);
+        if (skinEntry != null && skinEntry.signed()) {
+            skinValue = skinEntry.value();
+            skinSig = skinEntry.signature();
+        }
+        com.dwinovo.numen.Constants.LOG.info("[numen-skin] 召唤 {}: 皮肤选择={} 条目={} 携带签名数据={}",
+                n, summonSkinId, skinEntry == null ? "null" : skinEntry.name(), !skinValue.isEmpty());
+        Services.NETWORK.sendToServer(
+                new com.dwinovo.numen.network.payload.SummonRequestPayload(n, skinValue, skinSig));
         summoning = false;
         summonPersonaId = null;
         summonProviderId = null;
+        summonVoiceId = null;
         rebuild();   // the new companion arrives via CompanionListPayload — click its avatar to open
     }
 
@@ -1667,20 +2539,16 @@ public final class NumenScreen extends Screen {
         }
         if (button == 0) {
             // Summon dropdowns get first pick (their open lists overlay the panel).
-            if (summoning && summonPersonaDropdown != null && summonPersonaDropdown.mouseClicked(mouseX, mouseY)) {
-                String sel = summonPersonaDropdown.selectedId();
-                summonPersonaId = PERSONA_DEFAULT.equals(sel) ? null : sel;
-                return true;
-            }
-            if (summoning && summonProviderDropdown != null && summonProviderDropdown.mouseClicked(mouseX, mouseY)) {
-                summonProviderId = summonProviderDropdown.selectedId();
+            // 遮挡关系:先路由"正展开"的那一个——下排下拉向上翻时,展开列表盖住
+            // 上排的折叠框,固定顺序会让上排先吞掉点击。
+            if (summoning && routeSummonDropdownClick(mouseX, mouseY)) {
                 return true;
             }
             UUID close = railCloseAt((int) mouseX, (int) mouseY);
             if (close != null) { dismissPending = close; rebuild(); return true; }   // ✕ → confirm bar
             if (railPlusAt((int) mouseX, (int) mouseY)) {   // + → start the summon name prompt
                 summoning = !summoning;
-                if (summoning) summonPersonaId = null;   // fresh summon starts at "默认"
+                if (summoning) { summonPersonaId = null; summonVoiceId = null; summonSkinId = null; }   // fresh summon starts at "默认/无"
                 rebuild();
                 return true;
             }
@@ -1752,6 +2620,26 @@ public final class NumenScreen extends Screen {
                 }
                 return true;
             }
+            // 声线表单的后端下拉:选型变了就随之刷新字段区(typed 值经 preserve 存活)。
+            // 行滚出视口时不接点击(控件仍在,只是被表单滚动藏起来了)。
+            if (tab == Tab.SETTINGS && settingsSection == SettingsSection.VOICE
+                    && addingVoice && voiceBackendDropdown != null && voiceRowVisible(1)) {
+                String before = voiceBackendDropdown.selectedId();
+                if (voiceBackendDropdown.mouseClicked(mouseX, mouseY)) {
+                    String sel = voiceBackendDropdown.selectedId();
+                    if (!sel.equals(before)) {
+                        preserveVoiceForm();
+                        wVoiceBackend = sel;
+                        // URL 跟着选型换成新后端的官方端点——但只覆盖"空或还是旧默认"
+                        // 的值,用户手改过的自定义地址不动。
+                        if (wVoiceUrl.isBlank() || wVoiceUrl.equals(defaultVoiceUrl(before))) {
+                            wVoiceUrl = defaultVoiceUrl(sel);
+                        }
+                        rebuild();
+                    }
+                    return true;
+                }
+            }
             if (tab == Tab.SETTINGS && settingsClickedAt(mouseX, mouseY)) return true;
             int my = (int) mouseY;
             if (my >= top && my < top + HEADER_H) {
@@ -1770,9 +2658,9 @@ public final class NumenScreen extends Screen {
     /** If a chat fold-toggle row sits under (mx,my), flip its expanded state. Mirrors renderChat geometry. */
     private boolean toggleFoldAt(int mx, int my) {
         int bodyY = top + HEADER_H + 4;
-        int bodyBottom = top + PANEL_H - INPUT_H - PAD - 6;
+        int bodyBottom = top + panelH - INPUT_H - PAD - 6;
         int transX = left + PAD;
-        int transW = PANEL_W - PAD * 2 - PLAN_W - 8;
+        int transW = panelW - PAD * 2 - PLAN_W - 8;
         if (mx < transX || mx >= transX + transW || my < bodyY || my >= bodyBottom) return false;
         List<Row> rows = buildRows(transW);
         int idx = (my - (bodyY - scroll)) / LINE_H;
@@ -1784,31 +2672,52 @@ public final class NumenScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mx, double my, double delta) {   // 1.20.1: single scroll delta (no horizontal axis)
-        // Wheel over the left rail column scrolls the roster (works on any tab).
-        if (delta != 0 && mx >= railX && mx < railX + RAIL_W && maxRailScroll() > 0) {
-            railScroll = Mth.clamp((int) (railScroll - delta), 0, maxRailScroll());
+    public boolean mouseScrolled(double mx, double my, double sy) {   // 1.20.1: single scroll delta (no horizontal axis)
+        // 打开着的下拉列表优先吃滚轮(列表被面板截断时滚动余下的行)。
+        if (sy != 0) {
+            for (Dropdown d : new Dropdown[]{modelDropdown, provModelDropdown, voiceBackendDropdown,
+                    skinVariantDropdown, summonSkinDropdown, summonPersonaDropdown,
+                    summonProviderDropdown, summonVoiceDropdown}) {
+                if (d != null && d.mouseScrolled(mx, my, sy)) return true;
+            }
+            for (ProviderDropdown d : new ProviderDropdown[]{providerDropdown, provProviderDropdown}) {
+                if (d != null && d.mouseScrolled(mx, my, sy)) return true;
+            }
+        }
+        // 声线表单:滚轮上下滚整个表单(MiniMax 八行超出视口)。
+        if (sy != 0 && tab == Tab.SETTINGS && settingsSection == SettingsSection.VOICE
+                && addingVoice && mx >= secX() && maxVoiceFormScroll() > 0) {
+            preserveVoiceForm();
+            voiceFormScroll = Mth.clamp((int) (voiceFormScroll - sy * 16), 0, maxVoiceFormScroll());
+            rebuild();
             return true;
         }
-        if (tab == Tab.CHAT && delta != 0) {
-            scroll = Mth.clamp((int) (scroll - delta * LINE_H * 3), 0, lastMaxScroll);
+        // Wheel over the left rail column scrolls the roster (works on any tab).
+        if (sy != 0 && mx >= railX && mx < railX + RAIL_W && maxRailScroll() > 0) {
+            railScroll = Mth.clamp((int) (railScroll - sy), 0, maxRailScroll());
+            return true;
+        }
+        if (tab == Tab.CHAT && sy != 0) {
+            scroll = Mth.clamp((int) (scroll - sy * LINE_H * 3), 0, lastMaxScroll);
             pinBottom = scroll >= lastMaxScroll;
             return true;
         }
-        if (tab == Tab.SETTINGS && delta != 0 && !addingPersona && !addingProvider) {
+        if (tab == Tab.SETTINGS && sy != 0 && !addingPersona && !addingProvider && !addingVoice) {
             int count = switch (settingsSection) {
                 case MCP -> com.dwinovo.numen.mcp.client.McpClientManager.servers().size();
                 case SKILLS -> com.dwinovo.numen.agent.skill.SkillRegistry.instance().size();
                 case PERSONA -> PersonaLibrary.instance().list().size();
                 case PROVIDER -> com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list().size();
+                case VOICE -> com.dwinovo.numen.client.voice.VoiceLibrary.instance().list().size();
+                case SKIN -> com.dwinovo.numen.client.skin.SkinLibrary.instance().list().size();
                 default -> 0;
             };
             int listY0 = secY0() + 14;
             int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-            settingsScroll = Mth.clamp((int) (settingsScroll - delta), 0, Math.max(0, count - visible));
+            settingsScroll = Mth.clamp((int) (settingsScroll - sy), 0, Math.max(0, count - visible));
             return true;
         }
-        return super.mouseScrolled(mx, my, delta);
+        return super.mouseScrolled(mx, my, sy);
     }
 
     // ---- render ----
@@ -1819,18 +2728,29 @@ public final class NumenScreen extends Screen {
         pendingTip = null;   // recollected each frame by the section renderers
 
         // ONE merged Cottage sprite: left rail column + panel, continuous header, no gap.
-        GuiCompat.blitSprite(g, 
-                WORKSPACE_SPRITE, railX, top, RAIL_W + PANEL_W, PANEL_H);
+        GuiCompat.blitSprite(g,
+                WORKSPACE_SPRITE, railX, top, RAIL_W + panelW, panelH);
         renderRail(g, mouseX, mouseY);   // avatars + status + summon tile on the rail column
 
-        txt(g, Component.literal(name == null ? "Numen" : name), left + PAD, top + 7, ON_BAND);
-        int afterName = left + PAD + font.width(name == null ? "Numen" : name) + 6;
+        // 头部一行四个成员从右往左让位:tab(定宽) ← 用量 ← 人设名(可整个消失) ← 名字(最后裁)。
+        int headerLimit = tabX[0] - 8;
+        if (!summoning && dismissPending == null && tab == Tab.CHAT && uuid != null) {
+            headerLimit = renderUsage(g, mouseX, mouseY) - 8;
+        }
+        String nm = clip(name == null ? "Numen" : name, Math.max(24, headerLimit - (left + PAD)));
+        txt(g, Component.literal(nm), left + PAD, top + 7, ON_BAND);
+        int afterName = left + PAD + font.width(nm) + 6;
         if (uuid != null && ClientDeaths.isDead(uuid)) {        // active companion dead — respawn countdown
             long rem = ClientDeaths.remainingMs(uuid);
-            txt(g, Component.translatable("numen.respawn", (int) Math.ceil(rem / 1000.0)), afterName, top + 7, ON_BAND);
+            String rs = I18n.get("numen.respawn", (int) Math.ceil(rem / 1000.0));
+            if (afterName < headerLimit) {
+                txt(g, Component.literal(clip(rs, headerLimit - afterName)), afterName, top + 7, ON_BAND);
+            }
         } else {
             String pn = activePersonaName();                   // current persona, faint, right after the name
-            if (pn != null) txt(g, Component.literal(pn), afterName, top + 7, ON_BAND_FAINT);
+            if (pn != null && afterName + font.width("…") <= headerLimit) {
+                txt(g, Component.literal(clip(pn, headerLimit - afterName)), afterName, top + 7, ON_BAND_FAINT);
+            }
         }
         renderTabs(g, mouseX, mouseY);
 
@@ -1848,8 +2768,13 @@ public final class NumenScreen extends Screen {
             txt(g, Component.literal(I18n.get(ModLanguageData.Keys.PROVIDER_TITLE)
                     + (summonProviderDropdown == null ? I18n.get(ModLanguageData.Keys.SUMMON_PROVIDER_EMPTY) : "")),
                     left + PAD, y0 + 92, TXT_MUTED);
+            txt(g, Component.literal(I18n.get(ModLanguageData.Keys.VOICE_SUMMON_LABEL)
+                    + (summonVoiceDropdown == null ? I18n.get(ModLanguageData.Keys.VOICE_SUMMON_EMPTY) : "")),
+                    left + PAD, y0 + 126, TXT_MUTED);
+            txt(g, Component.translatable(ModLanguageData.Keys.SUMMON_SKIN),
+                    left + PAD + summonHalfW() + 6, y0 + 126, TXT_MUTED);
             txt(g, Component.translatable("numen.summon.hint"),
-                    left + PAD, y0 + 152, TXT_FAINT);
+                    left + PAD, y0 + 186, TXT_FAINT);
         } else {
             if (uuid != null) {
                 if (compactButton != null) compactButton.active = loop().canCompact();
@@ -1857,13 +2782,13 @@ public final class NumenScreen extends Screen {
             }
             switch (tab) {
                 case SETTINGS -> renderSettings(g, mouseX, mouseY);   // global — works with no companion
-                case CHAT -> { if (uuid != null) renderChat(g); else emptyHint(g); }
+                case CHAT -> { if (uuid != null) renderChat(g, mouseX, mouseY); else emptyHint(g); }
                 case ITEMS -> { if (uuid != null) renderItems(g, mouseX, mouseY); else emptyHint(g); }
             }
             if (tab == Tab.CHAT && warnUntil > System.currentTimeMillis()) {   // endpoint-problem hint above the input
                 txt(g, warnText != null ? Component.literal(warnText)
                                 : Component.translatable("numen.chat.no_key"),
-                        left + PAD, top + PANEL_H - INPUT_H - PAD - 11, FAIL);
+                        left + PAD, top + panelH - INPUT_H - PAD - 11, FAIL);
             }
         }
 
@@ -1871,8 +2796,10 @@ public final class NumenScreen extends Screen {
         // used to paint over the auto-rendered widgets). Text fields are borderless EditBoxes, so draw
         // a parchment field background + border behind each before it renders its text.
         for (AbstractWidget w : overlay) {
-            if (w instanceof EditBox eb) {                          // parchment frame, inflated past the inset text
-                GuiCompat.blitSprite(g, 
+            // visible 检查:声线表单滚出视口的 EditBox 隐藏了自己,框也必须跟着消失
+            // (否则空框越过面板边缘悬在世界上)。
+            if (w instanceof EditBox eb && eb.visible) {            // parchment frame, inflated past the inset text
+                GuiCompat.blitSprite(g,
                         FIELD_SPRITE, eb.getX() - FIELD_INSET_X, eb.getY() - FIELD_INSET_Y,
                         eb.getWidth() + FIELD_INSET_X * 2, eb.getHeight() + FIELD_INSET_Y * 2);
             }
@@ -1890,6 +2817,54 @@ public final class NumenScreen extends Screen {
             placeholder(g, proxyIpInput, "127.0.0.1");
             placeholder(g, proxyPortInput, "7890");
         }
+        // 声线表单:模型配置同款——每行标题画在输入框上方,框内只留短示例占位。
+        // 行序与 buildVoiceForm 的 switch 严格一致,随 voiceFormScroll 偏移。
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.VOICE && addingVoice) {
+            boolean fish = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH.equals(wVoiceBackend);
+            boolean minimax = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX.equals(wVoiceBackend);
+            boolean sovits = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS.equals(wVoiceBackend);
+            voiceLabel(g, 0, I18n.get(ModLanguageData.Keys.VOICE_FORM_NAME));
+            voiceLabel(g, 1, I18n.get(ModLanguageData.Keys.PROVIDER_FORM_PROVIDER));
+            voiceLabel(g, 2, I18n.get(ModLanguageData.Keys.VOICE_FORM_URL));
+            placeholder(g, voiceUrlInput, defaultVoiceUrl(wVoiceBackend));
+            int row = 3;
+            if (sovits) {
+                voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_REF));
+                placeholder(g, voiceRefInput, "D:/refs/voice.wav");
+                voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_PROMPT));
+                voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_LANG));
+                placeholder(g, voiceLangInput, "zh");
+            } else {
+                voiceLabel(g, row++, I18n.get(fish ? ModLanguageData.Keys.VOICE_FORM_KEY_FISH
+                        : minimax ? ModLanguageData.Keys.VOICE_FORM_KEY_MINIMAX
+                        : ModLanguageData.Keys.VOICE_FORM_KEY_OPENAI));
+                placeholder(g, voiceKeyInput, minimax ? "eyJ…" : "sk-…");
+                if (minimax) {
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_GROUP));
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_MINIMAX_MODEL));
+                    placeholder(g, voiceModelInput, "speech-02-turbo");
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_MINIMAX_VOICE));
+                    placeholder(g, voiceVoiceInput, "male-qn-qingse");
+                } else if (fish) {
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_REFERENCE));
+                    placeholder(g, voiceVoiceInput, "fish.audio/m/… 或纯 ID");
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_FISH_MODEL));
+                    placeholder(g, voiceModelInput, "s1 / s2.1-pro-free");
+                } else {
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_MODEL));
+                    placeholder(g, voiceModelInput, "FunAudioLLM/CosyVoice2-0.5B");
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_VOICE));
+                    placeholder(g, voiceVoiceInput, "FunAudioLLM/CosyVoice2-0.5B:alex");
+                }
+            }
+            voiceLabel(g, row, I18n.get(ModLanguageData.Keys.VOICE_FORM_VOLUME));
+            placeholder(g, voiceVolumeInput, "5");
+        }
+        // 声线表单的后端下拉最后画(展开的列表要压在字段上面)。
+        if (tab == Tab.SETTINGS && settingsSection == SettingsSection.VOICE
+                && addingVoice && voiceBackendDropdown != null && voiceRowVisible(1)) {
+            voiceBackendDropdown.render(g, font, mouseX, mouseY);
+        }
         // The model-config form's open dropdown lists must sit above the fields.
         if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PROVIDER && addingProvider) {
             if (provModelDropdown != null && provProviderDropdown != null && provProviderDropdown.isOpen()) {
@@ -1906,20 +2881,17 @@ public final class NumenScreen extends Screen {
             placeholder(g, mcpHeaderInput, mcpStdio ? "KEY=value; KEY2=value2" : "Authorization: Bearer <token>");
         }
         if (tab == Tab.SETTINGS && settingsSection == SettingsSection.PERSONA && addingPersona) {
-            placeholder(g, personaNameInput, "雷");   // the text area has its own built-in placeholder
+            placeholder(g, personaNameInput, "名称(即文件名),如 小焰");   // the text area has its own built-in placeholder
         }
         // (Chat-input placeholder is the FlatEditBox hint now — drawn shadowless and under the
         // caret in the widget pass, so it can't paint over the caret like a screen-side draw did.)
         // Summon warn — shown only when 创建 was clicked and something is missing
         // (error at the action, never ambient text). Takes the hint line's spot.
         if (summoning && warnUntil > System.currentTimeMillis() && warnText != null) {
-            g.drawString(font, warnText, left + PAD, top + HEADER_H + 152, 0xFFCC6666, false);
+            g.drawString(font, warnText, left + PAD, top + HEADER_H + 186, 0xFFCC6666, false);
         }
-        if (summoning && summonProviderDropdown != null) {
-            summonProviderDropdown.render(g, font, mouseX, mouseY);
-        }
-        if (summoning && summonPersonaDropdown != null) {
-            summonPersonaDropdown.render(g, font, mouseX, mouseY);
+        if (summoning) {
+            renderSummonDropdowns(g, mouseX, mouseY);
         }
 
         // Hovered MCP / skill row tooltip — drawn last so nothing paints over it.
@@ -1971,7 +2943,7 @@ public final class NumenScreen extends Screen {
             }
         }
         // "+" summon tile (baked "+" glyph), pinned to the rail bottom
-        int py = top + PANEL_H - PAD - RAIL_AV;
+        int py = top + panelH - PAD - RAIL_AV;
         // scroll cues — gold chevrons when the roster overflows the rail in either direction
         int cx = ax + RAIL_AV / 2;
         if (railScroll > 0) chevron(g, cx, top + 1, true);
@@ -1988,7 +2960,7 @@ public final class NumenScreen extends Screen {
 
     /** Bottom edge an avatar may reach (a gap above the pinned "+" tile). */
     private int railBottomEdge() {
-        return top + PANEL_H - PAD - RAIL_AV - RAIL_BOT_GAP;
+        return top + panelH - PAD - RAIL_AV - RAIL_BOT_GAP;
     }
 
     /** How many avatar slots fit in the rail above the pinned "+" tile. */
@@ -2029,7 +3001,7 @@ public final class NumenScreen extends Screen {
 
     private boolean railPlusAt(int mx, int my) {
         int ax = railX + (RAIL_W - RAIL_AV) / 2;
-        int py = top + PANEL_H - PAD - RAIL_AV;
+        int py = top + panelH - PAD - RAIL_AV;
         return mx >= ax && mx < ax + RAIL_AV && my >= py && my < py + RAIL_AV;
     }
 
@@ -2138,11 +3110,31 @@ public final class NumenScreen extends Screen {
 
     // ---- chat transcript + plan ----
 
-    private void renderChat(GuiGraphics g) {
+    /** 头部右侧(tab 左边)的上下文水位+累计消耗。恒定淡色——这是信息不是警报,
+     *  临近水位线会自动压缩,不需要玩家做任何事。返回文字左边界,标题据此让位。 */
+    private int renderUsage(GuiGraphics g, int mouseX, int mouseY) {
+        int pct = loop().contextPercent();
+        long total = loop().totalTokensUsed();
+        if (pct <= 0 && total <= 0) return tabX[0];
+        String s = (pct > 0 ? "context " + pct + "%" : "")
+                + (pct > 0 && total > 0 ? " · " : "")
+                + (total > 0 ? fmtTokens(total) + " tokens" : "");
+        int tx = tabX[0] - 10 - font.width(s);
+        txt(g, Component.literal(s), tx, top + 7, TXT_FAINT);
+        if (mouseX >= tx && mouseX < tabX[0] - 10 && mouseY >= top + 5 && mouseY < top + 17) {
+            g.renderComponentTooltip(font, List.of(
+                    Component.translatable("numen.chat.usage_tip.context"),
+                    Component.translatable("numen.chat.usage_tip.tokens"),
+                    Component.translatable("numen.chat.usage_tip.cache")), mouseX, mouseY);
+        }
+        return tx;
+    }
+
+    private void renderChat(GuiGraphics g, int mouseX, int mouseY) {
         int bodyY = top + HEADER_H + 4;
-        int bodyBottom = top + PANEL_H - INPUT_H - PAD - 6;
+        int bodyBottom = top + panelH - INPUT_H - PAD - 6;
         int transX = left + PAD;
-        int transW = PANEL_W - PAD * 2 - PLAN_W - 8;
+        int transW = panelW - PAD * 2 - PLAN_W - 8;
         int viewH = bodyBottom - bodyY;
 
         // plan panel divider + content
@@ -2216,10 +3208,12 @@ public final class NumenScreen extends Screen {
                     wrapPlain(out, shown, YOU, width);           // user = teal body, no label
             } else if (msg instanceof ConvoState.Msg.Assistant a) {
                     AssistantTurn turn = a.turn();
-                    if (turn.content() != null && !turn.content().isBlank()) {
+                    String spoken = com.dwinovo.numen.client.chat.ChatDisplayFilters.current()
+                            .filterAssistantMessage(turn.content());
+                    if (!spoken.isBlank()) {
                         flushTools(out, group, done, failed, width);   // spoken reply breaks the fold
                         addHeader(out, name, AI, width);         // bold name header on its OWN line
-                        wrapPlain(out, turn.content(), AI, width);
+                        wrapPlain(out, spoken, AI, width);
                     }
                     group.addAll(turn.toolCalls());
             } else if (msg instanceof ConvoState.Msg.Tool) {
@@ -2404,8 +3398,8 @@ public final class NumenScreen extends Screen {
         final int STORAGE_W = 9 * 18;                     // 162 — the widest element (caps the band)
         final int COMP_W = 130 + STORAGE_W;               // left col (130) + right col (storage)
         final int COMP_H = 152;
-        int startX = left + (PANEL_W - COMP_W) / 2;
-        int cTop = top + HEADER_H + (PANEL_H - HEADER_H - COMP_H) / 2;
+        int startX = left + (panelW - COMP_W) / 2;
+        int cTop = top + HEADER_H + (panelH - HEADER_H - COMP_H) / 2;
         int rightX = startX + 130;
 
         // -- LEFT: portrait socket, armor column + offhand (vertically centred against the portrait) --

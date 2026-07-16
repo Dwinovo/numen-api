@@ -20,7 +20,6 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.resources.language.I18n;
 
 import java.nio.file.Path;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -127,15 +126,18 @@ public final class EntityAgentLoop {
     /** Functional-block coordinate memory, injected as {@code <known_blocks>}. */
     private final WorkBlockMemory workBlocks;
     /**
-     * Prompts the owner typed while a turn was still in flight (waiting on the
-     * LLM, or on outstanding tool results). They must NOT be spliced into the
-     * conversation immediately: the OpenAI/DeepSeek protocol requires an
-     * {@code assistant} message carrying {@code tool_calls} to be followed
-     * <em>directly</em> by the matching {@code tool} results, with no
-     * {@code user} message in between. So we hold them here and flush them in
-     * at the next protocol-valid point (see {@link #flushBufferedPrompts}).
+     * 收件箱(宪法 §4):主人的话与世界事件的统一进箱口。协议约束是它存在的
+     * 底层原因——{@code assistant(tool_calls)} 后面必须直接跟 {@code tool}
+     * 结果,user 消息不能插队,所以输入一律进箱,在 {@link #drainInbox} 的
+     * 协议安全点一次倒空。三态路由(什么输入什么状态下配开轮)在
+     * {@link #pushEvent};条目、落盘、年龄标注在 {@link Inbox}。
      */
-    private final List<String> bufferedPrompts = new ArrayList<>();
+    private Inbox inbox;
+    /** 后台异步任务记账(派发回执置位,对上 id 的 task_finished 清零);null = 身体空闲。
+     *  客户端自记账,不走新网络包:回执与事件本来就都经过这里。 */
+    private CurrentTask currentTask;
+
+    private record CurrentTask(String id, String tool, long sinceMs) {}
 
     /**
      * This companion's persona (per-companion, dynamic). Sourced from the last {@code persona-change}
@@ -177,10 +179,21 @@ public final class EntityAgentLoop {
      */
     private final ToolDispatcher dispatcher;
 
+    /**
+     * 本同伴的流式语音管线,懒创建：首次在声线库里 resolve 到这个 UUID 的
+     * 绑定时才 new。未绑定 = 永远 null = 零开销。
+     * 见 {@link com.dwinovo.numen.client.voice.VoicePipeline}。
+     */
+    private com.dwinovo.numen.client.voice.VoicePipeline voice;
+
     /** A summarization call is in flight; blocks normal turns until it lands. */
     private boolean compacting = false;
     /** Context size of the last request as the API counted it (0 = unknown yet). */
     private int lastPromptTokens = 0;
+    /** 本同伴累计消耗的 token(每次请求的 total 之和,含压缩调用),持久化于
+     *  conversations/&lt;uuid&gt;.stats.json。计费口径:每次请求都全量计费 prompt,
+     *  所以按请求 total 累加才是真实开销。 */
+    private long totalTokensUsed = 0;
     /** Consecutive compaction failures — circuit breaker for the auto path. */
     private int compactFailures = 0;
 
@@ -226,10 +239,12 @@ public final class EntityAgentLoop {
             display.add(msg);
         });
         this.workBlocks = WorkBlockMemory.forEntity(numenRoot.resolve("memory"), entityUuid);
+        this.inbox = new Inbox(numenRoot.resolve("conversations"), entityUuid);
         this.providerEntryId = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().assignedEntry(entityUuid);
         this.dispatcher = new ToolDispatcher(entityUuid, new ToolDispatcher.Sink() {
             @Override public void onResult(ToolInvocation inv, String resultJson) {
                 harvestWorkBlocks(inv.name(), resultJson);
+                trackAsyncDispatch(inv.name(), resultJson);
                 convo.addToolResult(inv.id(), resultJson);
             }
             @Override public void onAllSettled() {
@@ -256,7 +271,59 @@ public final class EntityAgentLoop {
      *       the next prompt doesn't create back-to-back user messages.</li>
      * </ul>
      */
+    /** 与自动压缩闸门同一口径的模型上下文窗口。 */
+    private static int modelWindow() {
+        return com.dwinovo.numen.agent.model.ModelRegistry.contextWindow(
+                com.dwinovo.numen.client.screen.LlmProviders.normalize(
+                        com.dwinovo.numen.platform.Services.CONFIG.getProvider()),
+                com.dwinovo.numen.platform.Services.CONFIG.getModel());
+    }
+
+    /** 上下文水位百分比(基于上次请求的实测 prompt tokens);usage 未知时返回 0。 */
+    public int contextPercent() {
+        if (lastPromptTokens <= 0) return 0;
+        return Math.min(100, Math.round(lastPromptTokens * 100f / Math.max(1, modelWindow())));
+    }
+
+    /** 本同伴累计消耗的 token(跨会话持久化)。 */
+    public long totalTokensUsed() {
+        return totalTokensUsed;
+    }
+
+    private java.nio.file.Path statsFile() {
+        return Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("config").resolve("numen").resolve("conversations")
+                .resolve(entityUuid + ".stats.json");
+    }
+
+    private void loadStats() {
+        try {
+            java.nio.file.Path f = statsFile();
+            if (!java.nio.file.Files.isRegularFile(f)) return;
+            JsonObject o = com.google.gson.JsonParser.parseString(
+                    java.nio.file.Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+            if (o.has("totalTokens")) totalTokensUsed = Math.max(0, o.get("totalTokens").getAsLong());
+        } catch (java.io.IOException | RuntimeException ex) {
+            Constants.LOG.warn("[numen-entity#{}] token 统计读取失败: {}", entityUuid, ex.toString());
+        }
+    }
+
+    /** 累加一次请求的计费等效 tokens 并写穿到 stats 文件(文件极小,每回合一写)。 */
+    private void addTokens(long total) {
+        if (total <= 0) return;
+        totalTokensUsed += total;
+        try {
+            java.nio.file.Path f = statsFile();
+            java.nio.file.Files.createDirectories(f.getParent());
+            java.nio.file.Files.writeString(f, "{\"totalTokens\":" + totalTokensUsed + "}",
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException ex) {
+            Constants.LOG.warn("[numen-entity#{}] token 统计写盘失败: {}", entityUuid, ex.toString());
+        }
+    }
+
     private void restoreFromDisk() {
+        loadStats();
         log.migrateIfNeeded();   // upgrade a pre-v2 file in place before reading it (crash-safe, keeps a .v1.bak)
         ConvoLog.PersonaState p = log.loadCurrentPersona();   // independent of history — a persona may be set before any chat
         if (p != null && p.text() != null && !p.text().isBlank()) {
@@ -296,7 +363,7 @@ public final class EntityAgentLoop {
     /** Snapshot of prompts (GUI or {@code NumenGateway}) still waiting for the
      *  next protocol-valid splice point — the GUI renders these as pending. */
     public List<String> queuedPrompts() {
-        return List.copyOf(bufferedPrompts);
+        return inbox.snapshot();
     }
 
     /** Owner typed a prompt in the chat GUI. */
@@ -316,7 +383,7 @@ public final class EntityAgentLoop {
         boolean deferred = awaitingLlmResponse || dispatcher.busy();
         // Wrap the owner's words in <query> so the model can always tell real user input apart from
         // anything else numen injects into the same user turn (events, and future world-state/reminders).
-        bufferedPrompts.add("<query>" + text + "</query>");
+        inbox.pushPrompt("<query>" + text + "</query>");
         Constants.LOG.info("[numen-entity#{}] user prompt ({} chars){}{}: {}",
                 entityUuid, text.length(),
                 wasAborted ? " — reset previous abort" : "",
@@ -328,6 +395,53 @@ public final class EntityAgentLoop {
     /** Driven once per client tick (see {@code AgentLoopRegistry.tickAll}) — backstop timeout. */
     public void clientTick() {
         dispatcher.tick();
+        if (voice != null) voice.tick();
+        syncSpeakingState();
+    }
+
+    /** 上次发给服务端的说话状态(翻转才发包,不逐 tick 刷)。 */
+    private boolean lastSpeakingSent;
+
+    /** 大脑在输出(思考/生成/跑工具/语音在播)→ 告诉身体,好在说话期间注视主人。 */
+    private void syncSpeakingState() {
+        boolean speaking = awaitingLlmResponse || dispatcher.busy()
+                || (voice != null && voice.isSpeaking());
+        if (speaking != lastSpeakingSent) {
+            lastSpeakingSent = speaking;
+            com.dwinovo.numen.platform.Services.NETWORK.sendToServer(
+                    new com.dwinovo.numen.network.payload.SpeakingStatePayload(entityUuid, speaking));
+        }
+    }
+
+    // ---- streaming voice (TTS) ----
+
+    /**
+     * 一次 LLM 分发的语音接线：chunk 回调 + 收尾动作打包。语音未配置时是
+     * {@link #SILENT_VOICE}（sink 为 null、finish 是空操作）,chatStreaming
+     * 收到 null onChunk 与从前完全一样。
+     */
+    private record VoiceTurn(java.util.function.Consumer<JsonObject> sink, Runnable finish) {}
+
+    private static final VoiceTurn SILENT_VOICE = new VoiceTurn(null, () -> {});
+
+    /**
+     * 为即将发出的 chat 请求开启一轮语音（若该同伴绑定了声线）。每次分发都
+     * 重新 resolve——声线库/绑定的编辑下一轮生效;开新轮会打断上一轮还在
+     * 播的残句（新内容优先,与打断语义一致）。
+     */
+    private VoiceTurn beginVoiceTurn() {
+        com.dwinovo.numen.client.voice.VoiceLibrary.Entry cfg =
+                com.dwinovo.numen.client.voice.VoiceLibrary.instance().resolve(entityUuid);
+        if (cfg == null) {
+            if (voice != null) voice.interrupt();   // 总开关关闭/解绑:静音存量队列
+            return SILENT_VOICE;
+        }
+        if (voice == null) {
+            voice = new com.dwinovo.numen.client.voice.VoicePipeline(entityUuid);
+        }
+        final var vp = voice;
+        final int vgen = vp.beginTurn(cfg);
+        return new VoiceTurn(vp.chunkSink(vgen), () -> vp.endTurn(vgen));
     }
 
     /**
@@ -386,7 +500,7 @@ public final class EntityAgentLoop {
 
     /** Owner prompts are queued, waiting to flush into the conversation. */
     public boolean hasQueuedPrompts() {
-        return !bufferedPrompts.isEmpty();
+        return !inbox.isEmpty();
     }
 
     /** There is something an interrupt would act on — drives the Stop button's enabled state. */
@@ -419,6 +533,9 @@ public final class EntityAgentLoop {
      * No-op when nothing is running and nothing is queued.
      */
     public void abort() {
+        // 语音无条件先闭嘴:不管打断的是在飞的 turn 还是排队的 prompt,
+        // 主人按下 Stop 时还在播/待播的语音都不该继续。
+        if (voice != null) voice.interrupt();
         if (isBusy()) {
             // Priority 1: stop the running turn (or the in-flight compaction —
             // its response is generation-stamped too, so it gets discarded).
@@ -444,7 +561,7 @@ public final class EntityAgentLoop {
             // If we cut off an in-flight LLM call before its assistant turn was
             // recorded, the conversation now ends on a user message. Cap it with a
             // short assistant note so the next prompt doesn't create back-to-back
-            // user messages (some backends reject those — see flushBufferedPrompts).
+            // user messages (some backends reject those — see drainInbox).
             if (wasAwaitingLlm && cancelled.isEmpty()
                     && convo.lastMessage() instanceof ConvoState.Msg.User) {
                 convo.addAssistant(new AssistantTurn("(已中断)", List.of(), null));
@@ -453,13 +570,15 @@ public final class EntityAgentLoop {
             convo.resetTurnCount();
             aborted = true;
             Constants.LOG.info("[numen-entity#{}] interrupted by owner (awaitingLlm={}, cancelledTools={}, queued={})",
-                    entityUuid, wasAwaitingLlm, cancelled.size(), bufferedPrompts.size());
-        } else if (!bufferedPrompts.isEmpty()) {
-            // Priority 2: idle — drop the held queue.
-            int dropped = bufferedPrompts.size();
-            bufferedPrompts.clear();
-            Constants.LOG.info("[numen-entity#{}] interrupt cleared {} queued prompt(s)",
-                    entityUuid, dropped);
+                    entityUuid, wasAwaitingLlm, cancelled.size(), inbox.promptCount());
+        } else if (inbox.promptCount() > 0) {
+            // Priority 2: idle — drop the held PROMPT bucket only. Inboxed events are
+            // facts, not superseded instructions: they stay and ride the next turn
+            // (a death narrative wiped here left the model answering "啥情况" without
+            // knowing it had died — the exact hole this split closes).
+            int dropped = inbox.clearPrompts();
+            Constants.LOG.info("[numen-entity#{}] interrupt cleared {} queued prompt(s) ({} event(s) kept)",
+                    entityUuid, dropped, inbox.eventCount());
         }
     }
 
@@ -510,13 +629,14 @@ public final class EntityAgentLoop {
         // restored on respawn. The body is gone, so its tool results will never arrive — we'll synth
         // them at respawn instead.
         deathCause = cause;
+        if (voice != null) voice.interrupt();   // 尸体不说话:停播 + 清队列
         // Resolve at respawn: every outstanding call (in flight + still queued) — all
         // are listed in the assistant message, so all need results.
         deathInterruptedCalls = dispatcher.cancelAndDrain();
         turnGeneration++;          // discard any in-flight LLM response (halt output)
         awaitingLlmResponse = false;
         compacting = false;
-        bufferedPrompts.clear();
+        inbox.clearAll();
         dead = true;
         Constants.LOG.info("[numen-entity#{}] body died ({}) — loop frozen ({} call(s) in flight)",
                 entityUuid, cause, deathInterruptedCalls.size());
@@ -531,7 +651,9 @@ public final class EntityAgentLoop {
     public void onRespawned(String payloadCause) {
         boolean wasFrozen = dead;                 // same-session death (mid-task) vs a fresh loop after relog
         dead = false;
+        boolean hadSuspendedTurn = false;         // a turn was mid-flight when the body died
         if (wasFrozen) {
+            hadSuspendedTurn = !deathInterruptedCalls.isEmpty();
             for (String id : deathInterruptedCalls) {
                 convo.addToolResult(id, TaskResult.fail("任务因你死亡而中断").toJson());
             }
@@ -545,25 +667,71 @@ public final class EntityAgentLoop {
                 : (deathCause != null ? deathCause : "未知原因");
         String cause = raw.replace('<', '(').replace('>', ')');
         deathCause = null;
+        currentTask = null;   // 死亡掉了后台任务(无收尾事件),记账一并清零
         Constants.LOG.info("[numen-entity#{}] respawned ({}) — loop thawed", entityUuid, cause);
-        // urgent only when it died mid-task (react now); a fresh post-login revival waits for the owner.
-        injectEvent("<event kind=\"death\">你刚才死了(" + cause
-                + "),物品掉落在死亡地点,手头的任务中断了;现已在主人身边复活。先看看状况,继续或重新规划。</event>", wasFrozen);
+        // The death narrative is ALWAYS ambient — never a wake (mind-model constitution §4: 死亡叙事
+        // 无特权). Timing of who learns what, in order:
+        //   1. a mid-task death already reaches the model through D1: the interrupted tool calls were
+        //      resolved above with fail("任务因你死亡而中断"), so the suspended turn itself carries the
+        //      death the moment it continues;
+        //   2. this <event> is buffered BEFORE the resume below, so it splices into that same resumed
+        //      request as the ambient rider — the turn right after the death, no extra LLM call;
+        //   3. with no suspended turn (died idle, or a fresh loop after relog) it simply waits for the
+        //      next owner input. The OWNER's awareness is vanilla's death broadcast, not the model's job.
+        pushEvent("<event kind=\"death\">你刚才死了(" + cause
+                + "),物品掉落在死亡地点,手头的任务中断了;现已在主人身边复活。先看看状况,继续或重新规划。</event>", false);
+        // D1 resumes the suspended turn: the death-failure results above are exactly the tool results
+        // the in-flight turn was waiting on — continuing it is turn completion, not a wake. (Before the
+        // downgrade this resume rode the urgent flag; now it is explicit.)
+        if (hadSuspendedTurn) {
+            tryStartTurn();
+        }
+    }
+
+    /** 派发回执识别:异步工具的受理结果带 data.async=true 与 data.task_id。 */
+    private void trackAsyncDispatch(String toolName, String resultJson) {
+        try {
+            com.google.gson.JsonObject o =
+                    com.google.gson.JsonParser.parseString(resultJson).getAsJsonObject();
+            if (!o.has("data") || !o.get("data").isJsonObject()) return;
+            com.google.gson.JsonObject data = o.getAsJsonObject("data");
+            if (data.has("async") && data.get("async").getAsBoolean() && data.has("task_id")) {
+                currentTask = new CurrentTask(data.get("task_id").getAsString(), toolName,
+                        System.currentTimeMillis());
+            }
+        } catch (RuntimeException ignored) {
+            // 非 JSON 或形状不符——不是异步回执,不记账。
+        }
     }
 
     /**
-     * Inject an asynchronous world event into the conversation (dimension change, hazard, …) — the
-     * generic version of the Claude-Code "channel notification": the event rides the same buffered
-     * queue as owner prompts, so it splices in only at a protocol-valid boundary. {@code urgent} wakes
-     * an idle brain to react now; otherwise it sits in the queue and the brain sees it on the next
-     * owner-driven turn (no extra LLM call, no unprompted chatter). Dropped while frozen by death.
+     * 收件箱唯一入口(事件侧)。三态路由——消费时机由**发生时的状态**决定,
+     * 不由事件类型决定:
+     * <ul>
+     *   <li><b>回合进行中</b>:进箱躺着。{@link #tryStartTurn} 的守卫会挡下开轮,
+     *       到工具批结算的边界自然一次倒箱——"直接发"的最快合法形态;</li>
+     *   <li><b>身体在执行后台任务(大脑空闲)</b>:立刻开轮。任务期间的事是军情
+     *       (呛水、被袭、任务收尾都可能要改链),模型有权当场重新决策;</li>
+     *   <li><b>完全空闲</b>:进箱躺着,等下一个轮子搭车——僵尸击杀只是日记素材,
+     *       不值得单独吵主人。只有 {@code principal}(活人在说话:外部桥接的
+     *       弹幕/QQ 消息)例外,享受与主人同级的开轮资格。</li>
+     * </ul>
+     * push 即落盘(跨会话不失忆);死亡冻结期间丢弃。
      */
-    public void injectEvent(String xml, boolean urgent) {
+    public void pushEvent(String xml, boolean principal) {
         if (dead) return;
-        bufferedPrompts.add(xml);
-        Constants.LOG.info("[numen-entity#{}] event queued{}: {}",
-                entityUuid, urgent ? " (urgent)" : "", truncate(xml, 120));
-        if (urgent) {
+        // 后台任务收尾:对上 id 清记账。注意先取"发生时的状态"再清——收尾事件
+        // 本身发生在任务态,有资格立刻开轮(主动汇报"挖完了")。
+        boolean duringTask = currentTask != null;
+        if (duringTask && xml.contains("kind=\"task_finished\"")
+                && xml.contains("id=\"" + currentTask.id() + "\"")) {
+            currentTask = null;
+        }
+        inbox.pushEvent(xml);
+        Constants.LOG.info("[numen-entity#{}] event inboxed{}{}: {}",
+                entityUuid, principal ? " (principal)" : "", duringTask ? " (during task)" : "",
+                truncate(xml, 120));
+        if (principal || duringTask) {
             tryStartTurn();
         }
     }
@@ -634,7 +802,7 @@ public final class EntityAgentLoop {
         log.appendPersonaChange(id, text, name);
         display.add(new ConvoState.Msg.User(ConvoLog.PERSONA_DIVIDER));   // physical transcript gains a divider now
         String who = (name != null && !name.isBlank()) ? "「" + name + "」" : "新的设定";
-        injectEvent("<persona-change>你的人设已更新为" + who
+        pushEvent("<persona-change>你的人设已更新为" + who
                 + "。以上对话确实发生过，但从现在起请完全按新的人设继续，不必解释过去、不要延续旧的说话风格。</persona-change>", false);
     }
 
@@ -661,10 +829,27 @@ public final class EntityAgentLoop {
      * joined with newlines into one message to avoid back-to-back {@code user}
      * messages that some backends reject.
      */
-    private void flushBufferedPrompts() {
-        if (bufferedPrompts.isEmpty()) return;
-        String merged = String.join("\n", bufferedPrompts);
-        bufferedPrompts.clear();
+    private void drainInbox() {
+        if (inbox.isEmpty()) return;
+        List<String> parts = new ArrayList<>();
+        // 身体正在后台跑异步任务:每个回合都把这行放在最前,模型不用调工具就知道
+        // 手头有活(记账来自派发回执,收尾事件对上 id 即清,见 trackAsyncDispatch)。
+        if (currentTask != null) {
+            long secs = (System.currentTimeMillis() - currentTask.sinceMs()) / 1000;
+            parts.add("<current_task>" + currentTask.id() + " " + currentTask.tool()
+                    + " 后台进行中(已 " + secs + "s)。task_status 查进度,task_stop 叫停,"
+                    + "完成会自动收到 task_finished 事件,不要轮询。</current_task>");
+        }
+        // <known_blocks> 随用户回合注入,不放系统提示:它随放置/使用工作站而变,
+        // 放系统提示会打碎请求前缀的 prompt cache。系统提示(工具 schema+操作
+        // 核心+人设)因此字节级稳定,支持缓存的服务商整段命中。
+        AbstractClientPlayer envBody = resolveEntity();
+        String knownBlocks = workBlocks.formatXml(envBody != null ? envBody.level() : null);
+        if (!knownBlocks.isEmpty()) {
+            parts.add(knownBlocks);
+        }
+        parts.addAll(inbox.drain());
+        String merged = String.join("\n", parts);
         convo.addUser(merged);
         // A fresh owner directive starts a new tool-chain: restart the turn
         // counter (just log numbering now that the hard cap is gone).
@@ -699,7 +884,7 @@ public final class EntityAgentLoop {
         // Safe point: no assistant reply in flight and no tool results
         // outstanding, so the conversation ends with either a tool result or a
         // final assistant message — a user message can now be appended legally.
-        flushBufferedPrompts();
+        drainInbox();
         if (convo.snapshot().isEmpty()) return;
         // No hard cap on tool-call turns and no loop guard — a capable agent
         // legitimately chains many tasks, and resuming a timed-out move_to
@@ -721,9 +906,7 @@ public final class EntityAgentLoop {
         // history. Mirrors Claude Code's autoCompactIfNeeded. Backends that
         // never send a usage frame leave lastPromptTokens at 0 — fall back to
         // a local estimate so the gate still fires instead of never.
-        int window = com.dwinovo.numen.agent.model.ModelRegistry.contextWindow(
-                com.dwinovo.numen.client.screen.LlmProviders.normalize(com.dwinovo.numen.platform.Services.CONFIG.getProvider()),
-                com.dwinovo.numen.platform.Services.CONFIG.getModel());
+        int window = modelWindow();
         int contextTokens = lastPromptTokens > 0
                 ? lastPromptTokens
                 : estimateContextTokens(convo.snapshot());
@@ -750,8 +933,12 @@ public final class EntityAgentLoop {
         // Capture the current generation; if the owner interrupts before this
         // call resolves, handleResponse sees the mismatch and discards it.
         final int gen = turnGeneration;
-        client().chatStreaming(snapshot, tools, systemPrompt, null)
-                .whenComplete((res, err) -> bounceBackToMain(gen, res, err));
+        final VoiceTurn vt = beginVoiceTurn();
+        client().chatStreaming(snapshot, tools, systemPrompt, vt.sink())
+                .whenComplete((res, err) -> {
+                    vt.finish().run();
+                    bounceBackToMain(gen, res, err);
+                });
     }
 
     // ---- compaction ----
@@ -806,10 +993,11 @@ public final class EntityAgentLoop {
                     entityUuid, compactFailures, MAX_COMPACT_FAILURES,
                     err != null ? unwrap(err) : "empty summary");
             // The conversation is untouched — the next turn just runs uncompacted.
-            if (auto || !bufferedPrompts.isEmpty()) tryStartTurn();
+            if (auto || hasQueuedPrompts()) tryStartTurn();
             return;
         }
 
+        addTokens(res.freshTokens());   // 压缩调用同样烧 token,计入累计
         String wrapped = SUMMARY_HEADER + summary.strip();
         // The summary is lossy, but the very next prompt is usually a follow-up
         // to the model's LAST reply ("那第三点展开讲讲") — so that reply crosses
@@ -850,7 +1038,7 @@ public final class EntityAgentLoop {
         // Auto-compaction interrupted a turn that was about to dispatch —
         // resume it so the task chain continues on the compacted history. After
         // a MANUAL compact we stay idle unless prompts queued up meanwhile.
-        if (auto || !bufferedPrompts.isEmpty()) tryStartTurn();
+        if (auto || hasQueuedPrompts()) tryStartTurn();
     }
 
     /**
@@ -938,42 +1126,20 @@ public final class EntityAgentLoop {
         String base = (personaText != null && !personaText.isBlank())
                 ? personaText : Services.CONFIG.getSystemPrompt();
         if (base == null || base.isBlank()) base = "未配置人设,可以自由发挥。";
-        String envBlock = buildEnvBlock();
-        AbstractClientPlayer body = resolveEntity();
-        String knownBlocks = workBlocks.formatXml(body != null ? body.level() : null);
         String skillsXml = SkillRegistry.instance().formatXml();
 
+        // 系统提示只放会话内稳定的层——人设/操作核心/技能表/情绪词表。
+        // 会变化的 <known_blocks> 随用户回合注入(drainInbox),
+        // 让这里成为字节级稳定的缓存前缀。
         StringBuilder sb = new StringBuilder();
         // Persona = the mutable "who you are" layer, wrapped so it's clearly delimited from the
         // immutable operating core (ENTITY_PROMPT) that follows.
         sb.append("<persona>\n").append(base.strip()).append("\n</persona>");
         sb.append(ENTITY_PROMPT);
-        if (envBlock != null) {
-            sb.append("\n\n").append(envBlock);
-        }
-        if (!knownBlocks.isEmpty()) {
-            sb.append("\n\n").append(knownBlocks);
-        }
         if (!skillsXml.isEmpty()) {
             sb.append("\n\n").append(skillsXml);
         }
         return sb.toString();
-    }
-
-    private String buildEnvBlock() {
-        AbstractClientPlayer entity = resolveEntity();
-        if (entity == null) return null;
-        // The brain runs on the owner's client, so the local player IS the owner.
-        var localOwner = Minecraft.getInstance().player;
-        String ownerName = localOwner != null ? localOwner.getName().getString() : "unknown";
-        String myName = NumenRoster.instance().name(entityUuid);   // the in-game name the owner gave this companion
-        return "<env>\n"
-                + (myName != null ? "  companion_name: " + myName + "\n" : "")
-                + "  entity_uuid: " + entityUuid + "\n"
-                + "  owner_name: " + ownerName + "\n"
-                + "  dimension: " + entity.level().dimension().location() + "\n"
-                + "  today: " + LocalDate.now() + "\n"
-                + "</env>";
     }
 
     private AbstractClientPlayer resolveEntity() {
@@ -989,7 +1155,7 @@ public final class EntityAgentLoop {
      * as before (the next prompt or event resumes).
      */
     private void failTurnKeepQueue() {
-        if (bufferedPrompts.isEmpty()) {
+        if (inbox.isEmpty()) {
             aborted = true;
             return;
         }
@@ -999,8 +1165,8 @@ public final class EntityAgentLoop {
         if (convo.lastMessage() instanceof ConvoState.Msg.User) {
             convo.addAssistant(new AssistantTurn("(连接中断)", List.of(), null));
         }
-        Constants.LOG.info("[numen-entity#{}] turn failed with {} queued prompt(s) — starting a fresh turn with them",
-                entityUuid, bufferedPrompts.size());
+        Constants.LOG.info("[numen-entity#{}] turn failed with {} inboxed item(s) — starting a fresh turn with them",
+                entityUuid, inbox.promptCount() + inbox.eventCount());
         tryStartTurn();
     }
 
@@ -1042,9 +1208,13 @@ public final class EntityAgentLoop {
                 Constants.LOG.info("[numen-entity#{}] re-running failed turn once", entityUuid);
                 awaitingLlmResponse = true;
                 final int gen2 = turnGeneration;
+                final VoiceTurn vt2 = beginVoiceTurn();   // 重跑也重新开口(失败那次的半截语音随 beginTurn 作废)
                 client().chatStreaming(convo.snapshot(), ToolRegistry.all(),
-                                composeSystemPrompt(), null)
-                        .whenComplete((r2, e2) -> bounceBackToMain(gen2, r2, e2));
+                                composeSystemPrompt(), vt2.sink())
+                        .whenComplete((r2, e2) -> {
+                            vt2.finish().run();
+                            bounceBackToMain(gen2, r2, e2);
+                        });
                 return;
             }
             failTurnKeepQueue();
@@ -1062,6 +1232,7 @@ public final class EntityAgentLoop {
         if (res.promptTokens() > 0) {
             lastPromptTokens = res.promptTokens();
         }
+        addTokens(res.freshTokens());
 
         convo.addAssistant(turn);
 
@@ -1077,7 +1248,7 @@ public final class EntityAgentLoop {
             convo.resetTurnCount();
             // A prompt that arrived during this final turn was buffered; now that
             // the chain has settled, start a fresh turn to answer it.
-            if (!bufferedPrompts.isEmpty()) tryStartTurn();
+            if (hasQueuedPrompts()) tryStartTurn();
             return;
         }
 
