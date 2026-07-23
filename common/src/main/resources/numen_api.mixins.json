@@ -9,7 +9,8 @@
     "MixinServerGamePacketListener"
   ],
   "client": [
-    "MixinMinecraft"
+    "MixinMinecraft",
+    "MixinPlayerInfo"
   ],
   "server": [],
   "injectors": {
