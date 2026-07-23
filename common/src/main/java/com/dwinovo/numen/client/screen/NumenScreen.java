@@ -1092,10 +1092,8 @@ public final class NumenScreen extends Screen {
         }).orElse(TXT_FAINT);
     }
 
-    private static net.minecraft.resources.ResourceLocation skinFor(UUID u) {
-        AbstractClientPlayer e = ClientNumenLookup.resolve(u);
-        // 1.20.1: skins are a ResourceLocation, not a PlayerSkin record.
-        return e != null ? e.getSkinTextureLocation() : DefaultPlayerSkin.getDefaultSkin(u);
+    private static PlayerSkin skinFor(UUID u) {
+        return com.dwinovo.numen.client.agent.KnownSkins.of(u);
     }
 
     /** Roster index of the avatar under (mx,my), or -1. */

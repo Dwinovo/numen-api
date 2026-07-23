@@ -210,8 +210,7 @@ public final class NumenToasts {
 
     private static net.minecraft.resources.ResourceLocation skinFor(UUID uuid) {
         AbstractClientPlayer e = ClientNumenLookup.resolve(uuid);
-        // 1.20.1: skins are a ResourceLocation, not a PlayerSkin record.
-        return e != null ? e.getSkinTextureLocation() : DefaultPlayerSkin.getDefaultSkin(uuid);
+        return com.dwinovo.numen.client.agent.KnownSkins.of(uuid);
     }
 
     /** Eased slide: {@code dist} px → 0 over {@link #SLIDE_MS}. */
