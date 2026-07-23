@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -40,7 +41,7 @@ public final class ToolArgs {
 
     /** A required integer, clamped into {@code [min, max]}. */
     public static int requireInt(JsonObject args, String key, int min, int max) {
-        return Math.max(min, Math.min(max, requireInt(args, key)));
+        return Mth.clamp(requireInt(args, key), min, max);
     }
 
     /** A nullable integer arg: {@code null} when absent or JSON null. */
@@ -77,7 +78,7 @@ public final class ToolArgs {
 
     /** A required numeric arg, clamped into {@code [min, max]}. */
     public static double requireDouble(JsonObject args, String key, double min, double max) {
-        return Math.max(min, Math.min(max, requireDouble(args, key)));
+        return Mth.clamp(requireDouble(args, key), min, max);
     }
 
     /** A nullable numeric arg: {@code null} when absent or JSON null. */
