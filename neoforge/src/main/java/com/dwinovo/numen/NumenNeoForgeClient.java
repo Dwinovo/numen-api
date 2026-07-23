@@ -1,6 +1,7 @@
 package com.dwinovo.numen;
 
 import com.dwinovo.numen.agent.skill.SkillRegistry;
+import com.dwinovo.numen.mcp.client.McpClientManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
@@ -23,14 +24,40 @@ import java.nio.file.Path;
 public class NumenNeoForgeClient {
 
     public NumenNeoForgeClient(IEventBus modBus) {
+        // MCP client: connect to external MCP servers in config/numen/mcp_clients.json
+        // and register their tools for the built-in brain. Config dir from FML (no
+        // Minecraft instance needed this early).
+        McpClientManager.initClient(
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve(Constants.MOD_ID));
+
+        // MCP server: the other direction — a loopback MCP server letting an external
+        // agent drive companions directly, bypassing the built-in brain. Off unless
+        // enabled in config/numen/mcp_server.json.
+        com.dwinovo.numen.mcp.server.NumenMcp.initClient(
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get());
+
+        // 读回上次选择的 GUI 主题(config/numen/ui.json)。
+        com.dwinovo.numen.client.screen.UiTheme.init(
+                net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("numen"));
+
         // Mod bus — registration events.
         modBus.addListener(NumenNeoForgeClient::registerKeyMappings);
         modBus.addListener(NumenNeoForgeClient::registerGuiLayers);
         modBus.addListener(NumenNeoForgeClient::registerReloadListeners);
+        modBus.addListener(NumenNeoForgeClient::registerShaders);
         // Game bus — per-tick / world-render / disconnect.
         NeoForge.EVENT_BUS.addListener(NumenNeoForgeClient::onClientTick);
-        NeoForge.EVENT_BUS.addListener(NumenNeoForgeClient::onRenderLevel);
         NeoForge.EVENT_BUS.addListener(NumenNeoForgeClient::onLoggingOut);
+        NeoForge.EVENT_BUS.addListener(NumenNeoForgeClient::onRenderLevel);
+    }
+
+    static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent event) {
+        // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        if (event.getStage() == net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage
+                .AFTER_TRANSLUCENT_BLOCKS) {
+            com.dwinovo.numen.client.debug.PathDebugRenderer.render(
+                    event.getPoseStack(), event.getCamera());
+        }
     }
 
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
@@ -44,21 +71,12 @@ public class NumenNeoForgeClient {
         com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
     }
 
-    static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent event) {
-        // 1.21.5 predates the per-stage AfterTranslucentBlocks event subclass; gate on the Stage enum.
-        if (event.getStage() != net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
-            return;
-        }
-        // In-world path overlay for every companion (Baritone PathRenderer port).
-        com.dwinovo.numen.client.path.PathVizRenderer.render(event.getPoseStack());
-    }
-
     static void onLoggingOut(net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
-        // Drop every path overlay on disconnect so a frozen path can't survive a relog.
-        com.dwinovo.numen.client.path.ClientPathViz.clearAll();
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
+        com.dwinovo.numen.client.agent.KnownSkins.clear();
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
+        com.dwinovo.numen.client.debug.PathDebugState.clear();
     }
 
     static void registerGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {
@@ -66,6 +84,19 @@ public class NumenNeoForgeClient {
         event.registerAboveAll(
                 new ResourceLocation(Constants.MOD_ID, "numen_toasts"),
                 (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
+    }
+
+    static void registerShaders(net.neoforged.neoforge.client.event.RegisterShadersEvent event) {
+        // GUI 圆角 SDF shader;加载失败仅告警——RoundRect 会自动降级成方角 fill。
+        try {
+            event.registerShader(new net.minecraft.client.renderer.ShaderInstance(
+                            event.getResourceProvider(),
+                            new ResourceLocation(Constants.MOD_ID, "rendertype_round_rect"),
+                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR),
+                    com.dwinovo.numen.client.ui.RoundRect::setShader);
+        } catch (Exception e) {
+            Constants.LOG.warn("round rect shader failed to load, falling back to square corners", e);
+        }
     }
 
     static void registerReloadListeners(RegisterClientReloadListenersEvent event) {

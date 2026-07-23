@@ -77,8 +77,7 @@ public final class FakeConnection extends Connection {
         // no-op
     }
 
-    /** Neutralise the keep-alive timeout (and any other) disconnect. 1.20.6 has only the
-     *  Component overload (DisconnectionDetails is 1.21+). */
+    /** Neutralise the keep-alive timeout (and any other) disconnect — 1.20.6 只有 Component 单参重载(DisconnectionDetails 是 1.21+). */
     @Override
     public void disconnect(Component message) {
         // no-op: the companion is removed via CompanionLifecycle, never by the wire
