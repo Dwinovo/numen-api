@@ -1,6 +1,7 @@
 package com.dwinovo.numen;
 
 import com.dwinovo.numen.agent.skill.SkillRegistry;
+import com.dwinovo.numen.mcp.client.McpClientManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
@@ -19,6 +20,21 @@ public class NumenFabricClient implements ClientModInitializer {
         Path numenConfigRoot = Minecraft.getInstance().gameDirectory.toPath()
                 .resolve("config").resolve(Constants.MOD_ID);
         Path skillsDir = numenConfigRoot.resolve("skills");
+
+        // 读回上次选择的 GUI 主题(config/numen/ui.json)。
+        com.dwinovo.numen.client.screen.UiTheme.init(
+                Minecraft.getInstance().gameDirectory.toPath().resolve("config").resolve("numen"));
+
+        // MCP client: connect to any external MCP servers listed in
+        // config/numen/mcp_clients.json and register their tools so the built-in
+        // brain can call them.
+        McpClientManager.initClient(numenConfigRoot);
+
+        // MCP server: the other direction — a loopback MCP server letting an external
+        // agent drive companions directly, bypassing the built-in brain.
+        // Off unless enabled in config/numen/mcp_server.json.
+        com.dwinovo.numen.mcp.server.NumenMcp.initClient(
+                Minecraft.getInstance().gameDirectory.toPath().resolve("config"));
 
         // Skills live under config/numen/skills. Hook the resource reload
         // pipeline so /reload picks up newly added SKILL.md files without a
@@ -39,6 +55,19 @@ public class NumenFabricClient implements ClientModInitializer {
                     }
                 });
 
+        // GUI 圆角 SDF shader;注册失败仅告警——RoundRect 会自动降级成方角 fill。
+        net.fabricmc.fabric.api.client.rendering.v1.CoreShaderRegistrationCallback.EVENT
+                .register(context -> {
+                    try {
+                        context.register(
+                                new ResourceLocation(Constants.MOD_ID, "rendertype_round_rect"),
+                                com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR,
+                                com.dwinovo.numen.client.ui.RoundRect::setShader);
+                    } catch (Exception e) {
+                        Constants.LOG.warn("round rect shader failed to load, falling back to square corners", e);
+                    }
+                });
+
         // G → companion roster panel (chat entry + settings/reset live in there).
         KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
@@ -53,19 +82,22 @@ public class NumenFabricClient implements ClientModInitializer {
         net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
                 (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
 
-        // In-world path overlay for every companion (Baritone PathRenderer port),
-        // drawn after translucent terrain so it sits over the world.
-        net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents.AFTER_ENTITIES
-                .register(ctx -> com.dwinovo.numen.client.path.PathVizRenderer.render(ctx.matrixStack()));
-
-        // Drop every path overlay on disconnect so a frozen path can't survive a
-        // relog (the server can't send a clear to a player who's already gone).
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT
                 .register((handler, client) -> {
-                    com.dwinovo.numen.client.path.ClientPathViz.clearAll();
                     com.dwinovo.numen.client.data.ClientNumenInventory.clear();
+                    com.dwinovo.numen.client.agent.KnownSkins.clear();
                     com.dwinovo.numen.client.hud.NumenToasts.clear();
                     com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
+                    com.dwinovo.numen.client.debug.PathDebugState.clear();
+                });
+
+        // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents.AFTER_TRANSLUCENT
+                .register(context -> {
+                    if (context.matrixStack() != null) {
+                        com.dwinovo.numen.client.debug.PathDebugRenderer.render(
+                                context.matrixStack(), context.camera());
+                    }
                 });
     }
 }

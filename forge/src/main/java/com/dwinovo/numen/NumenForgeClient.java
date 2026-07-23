@@ -6,7 +6,6 @@ import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
@@ -31,14 +30,42 @@ public final class NumenForgeClient {
 
     /** Wire every client listener. {@code modBus} is the mod event bus from the constructor. */
     public static void init(IEventBus modBus) {
+        // 读回上次选择的 GUI 主题(config/numen/ui.json)。路径走 FMLPaths——
+        // datagen 环境没有 Minecraft 实例,Minecraft.getInstance() 会 NPE 炸掉 CI。
+        com.dwinovo.numen.client.screen.UiTheme.init(
+                net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get().resolve("numen"));
         // Mod bus — registration events.
         modBus.addListener(NumenForgeClient::registerKeyMappings);
         modBus.addListener(NumenForgeClient::registerGuiOverlays);
         modBus.addListener(NumenForgeClient::registerReloadListeners);
+        modBus.addListener(NumenForgeClient::registerShaders);
         // Game bus — per-tick / world-render / disconnect.
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onClientTick);
-        MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onRenderLevel);
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onLoggingOut);
+        MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onRenderLevel);
+    }
+
+    static void onRenderLevel(net.minecraftforge.client.event.RenderLevelStageEvent event) {
+        // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        if (event.getStage() == net.minecraftforge.client.event.RenderLevelStageEvent.Stage
+                .AFTER_TRANSLUCENT_BLOCKS) {
+            com.dwinovo.numen.client.debug.PathDebugRenderer.render(
+                    event.getPoseStack(), event.getCamera());
+        }
+    }
+
+    static void registerShaders(net.minecraftforge.client.event.RegisterShadersEvent event) {
+        // GUI 圆角 SDF shader;加载失败仅告警——RoundRect 会自动降级成方角 fill。
+        try {
+            event.registerShader(new net.minecraft.client.renderer.ShaderInstance(
+                            event.getResourceProvider(),
+                            new net.minecraft.resources.ResourceLocation(
+                                    Constants.MOD_ID, "rendertype_round_rect"),
+                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR),
+                    com.dwinovo.numen.client.ui.RoundRect::setShader);
+        } catch (Exception e) {
+            Constants.LOG.warn("round rect shader failed to load, falling back to square corners", e);
+        }
     }
 
     static void registerKeyMappings(RegisterKeyMappingsEvent event) {
@@ -55,21 +82,12 @@ public final class NumenForgeClient {
         com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
     }
 
-    static void onRenderLevel(RenderLevelStageEvent event) {
-        // Draw after translucent terrain so the overlay sits over the world.
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
-            return;
-        }
-        // In-world path overlay for every companion (Baritone PathRenderer port).
-        com.dwinovo.numen.client.path.PathVizRenderer.render(event.getPoseStack());
-    }
-
     static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
-        // Drop every path overlay on disconnect so a frozen path can't survive a relog.
-        com.dwinovo.numen.client.path.ClientPathViz.clearAll();
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
+        com.dwinovo.numen.client.agent.KnownSkins.clear();
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
+        com.dwinovo.numen.client.debug.PathDebugState.clear();
     }
 
     static void registerGuiOverlays(RegisterGuiOverlaysEvent event) {
@@ -84,6 +102,17 @@ public final class NumenForgeClient {
         Path numenConfigRoot = Minecraft.getInstance().gameDirectory.toPath()
                 .resolve("config").resolve(Constants.MOD_ID);
         Path skillsDir = numenConfigRoot.resolve("skills");
+
+        // MCP client: connect to any external MCP servers listed in
+        // config/numen/mcp_clients.json and register their tools so the built-in
+        // brain can call them.
+        com.dwinovo.numen.mcp.client.McpClientManager.initClient(numenConfigRoot);
+
+        // MCP server: the other direction — a loopback MCP server letting an external
+        // agent drive companions directly, bypassing the built-in brain.
+        // Off unless enabled in config/numen/mcp_server.json.
+        com.dwinovo.numen.mcp.server.NumenMcp.initClient(
+                Minecraft.getInstance().gameDirectory.toPath().resolve("config"));
 
         event.registerReloadListener((ResourceManagerReloadListener) rm -> {
             SkillRegistry.instance().scan(skillsDir);

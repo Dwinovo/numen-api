@@ -2,9 +2,7 @@ package com.dwinovo.numen.entity;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.Vec3;
 
@@ -20,7 +18,7 @@ import java.util.UUID;
  * to the player list (→ chunk loading for free) and to the level, but does NOT
  * load a hand-built fake player's {@code .dat} (that path is tied to the real
  * login flow) — so {@link #spawn} restores position / inventory / owner from disk
- * explicitly afterwards, the way Carpet's {@code EntityPlayerMPFake} does.
+ * explicitly afterwards.
  * {@link net.minecraft.server.players.PlayerList#remove} saves that data back and
  * removes the body — so despawn is a clean, persisted dormancy.
  */
@@ -37,12 +35,21 @@ public final class CompanionFactory {
     public static NumenPlayer spawn(MinecraftServer server, UUID companionUuid, String name,
                                      UUID ownerUuid, ServerLevel level, Vec3 pos) {
         GameProfile profile = new GameProfile(companionUuid, name);
-        NumenPlayer player = new NumenPlayer(server, level, profile, ClientInformation.createDefault());
+        // 借来的正版皮肤(Mojang 签名的 textures,注册表持久化)注入档案——客户端只认
+        // 签过名的皮肤数据;没有则回落原版默认皮肤(按 UUID 哈希抽取)。
+        CompanionRegistry.Entry reg = CompanionRegistry.get(server).find(companionUuid);
+        if (reg != null && !reg.skinValue().isEmpty()) {
+            profile.getProperties().put("textures", new com.mojang.authlib.properties.Property(
+                    "textures", reg.skinValue(), reg.skinSig().isEmpty() ? null : reg.skinSig()));
+        }
+        NumenPlayer player = new NumenPlayer(server, level, profile,
+                net.minecraft.server.level.ClientInformation.createDefault());
         FakeConnection connection = new FakeConnection();
         server.getPlayerList().placeNewPlayer(connection, player,
-                CommonListenerCookie.createInitial(profile));  // 1.20.4: no 'transferred' boolean yet
+                new net.minecraft.server.network.CommonListenerCookie(profile,
+                        0, player.clientInformation()));
         // placeNewPlayer does NOT load a hand-built fake player's .dat, so restore
-        // it ourselves (Carpet's model): position, inventory, health, owner from
+        // it ourselves: position, inventory, health, owner from
         // disk. Without this a respawned companion spawns at 0,0,0 with no items.
         loadPlayerData(server, player);
         // Companions are always survival, whatever the world's default game type — their whole design
@@ -66,8 +73,8 @@ public final class CompanionFactory {
      * Restore a fake player's saved state from its playerdata {@code .dat}
      * ({@link net.minecraft.server.players.PlayerList#loadPlayerData} +
      * {@link net.minecraft.world.entity.Entity#load}). {@code placeNewPlayer}
-     * skips this for hand-constructed players, so we do it like Carpet's
-     * {@code loadPlayerData}. No-op on first summon (no file yet).
+     * skips this for hand-constructed players, so we invoke the same load
+     * ourselves. No-op on first summon (no file yet).
      */
     private static void loadPlayerData(MinecraftServer server, NumenPlayer player) {
         // 1.20.4: PlayerList.load(player) returns a nullable CompoundTag (predates both the

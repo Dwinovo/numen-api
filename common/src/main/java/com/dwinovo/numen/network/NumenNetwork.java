@@ -5,12 +5,11 @@ import com.dwinovo.numen.network.payload.NumenLocationsPayload;
 import com.dwinovo.numen.network.payload.LocateNumenPayload;
 import com.dwinovo.numen.network.payload.ClientUiActionPayload;
 import com.dwinovo.numen.network.payload.CompanionListPayload;
-import com.dwinovo.numen.network.payload.PathVizPayload;
 import com.dwinovo.numen.platform.Services;
 
 /**
  * Central registration hub for every {@link
- * net.minecraft.network.protocol.common.custom.CustomPacketPayload} the mod
+ * com.dwinovo.numen.network.CustomPacketPayload} the mod
  * declares. Each loader's mod-init code calls {@link #register} exactly once
  * during startup; the {@link Services#NETWORK} platform implementation handles
  * the loader-specific timing.
@@ -29,6 +28,30 @@ public final class NumenNetwork {
     private NumenNetwork() {}
 
     public static void register() {
+        // C→S: the client agent loop decided to run a body-bound tool on its companion.
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.ExecuteToolPayload.ID,
+                com.dwinovo.numen.network.payload.ExecuteToolPayload::read,
+                com.dwinovo.numen.network.payload.ExecuteToolPayload::handle);
+
+        // S→C: a body-bound tool's result (or an async dispatch receipt) coming home.
+        Services.NETWORK.registerServerToClient(
+                com.dwinovo.numen.network.payload.TaskResultPayload.ID,
+                com.dwinovo.numen.network.payload.TaskResultPayload::read,
+                com.dwinovo.numen.network.payload.TaskResultPayload::handle);
+
+        // C→S: owner pressed Stop — cancel the companion's queued + running tasks.
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.CancelTasksPayload.ID,
+                com.dwinovo.numen.network.payload.CancelTasksPayload::read,
+                com.dwinovo.numen.network.payload.CancelTasksPayload::handle);
+
+        // C→S: 大脑开始/结束输出——身体据此在说话期间注视主人(纯姿态信号)。
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.SpeakingStatePayload.ID,
+                com.dwinovo.numen.network.payload.SpeakingStatePayload::read,
+                com.dwinovo.numen.network.payload.SpeakingStatePayload::handle);
+
         // S→C: an Numen body died; suspend the owner's agent loop (resolves the in-flight
         // tool call with the death cause). Recoverable — see NumenRespawnPayload.
         Services.NETWORK.registerServerToClient(
@@ -52,12 +75,6 @@ public final class NumenNetwork {
         Services.NETWORK.registerServerToClient(
                 CompanionListPayload.ID, CompanionListPayload::read,
                 CompanionListPayload::handle);
-
-        // S→C: the companion's current pathfinding plan, for the in-world path
-        // overlay (Baritone PathRenderer, ported to our server-authored path).
-        Services.NETWORK.registerServerToClient(
-                PathVizPayload.ID, PathVizPayload::read,
-                PathVizPayload::handle);
 
         // S→C: server `/numen` verbs that must act on the caller's own client
         // (open settings GUI / reset conversations).
@@ -98,5 +115,11 @@ public final class NumenNetwork {
                 com.dwinovo.numen.network.payload.DismissRequestPayload.ID,
                 com.dwinovo.numen.network.payload.DismissRequestPayload::read,
                 com.dwinovo.numen.network.payload.DismissRequestPayload::handle);
+
+        // S→C: a companion's live pathing state for the debug overlay (lines/boxes).
+        Services.NETWORK.registerServerToClient(
+                com.dwinovo.numen.network.payload.PathDebugPayload.ID,
+                com.dwinovo.numen.network.payload.PathDebugPayload::read,
+                com.dwinovo.numen.network.payload.PathDebugPayload::handle);
     }
 }

@@ -7,8 +7,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 
-import java.util.function.Consumer;
-
 /**
  * A channel-less {@link Connection} for a companion fake {@code ServerPlayer}.
  * The server pushes a steady stream of clientbound packets at any list-resident
@@ -23,48 +21,41 @@ import java.util.function.Consumer;
  * details make {@code placeNewPlayer} accept it:
  * <ul>
  *   <li><b>SERVERBOUND</b> receiving flow — a server-side player connection
- *       receives serverbound packets (the client sends them), so its listener
- *       is serverbound; {@code validateListener} rejects a CLIENTBOUND mismatch.</li>
- *   <li>a real (in-memory) {@link EmbeddedChannel} — {@code placeNewPlayer ->
- *       setupInboundProtocol} configures the channel's pipeline, which NPEs on a
- *       channel-less connection. Registering this Connection as the embedded
- *       channel's handler fires {@code channelActive}, setting the channel.</li>
+ *       receives serverbound packets, so its listener is serverbound;
+ *       {@code validateListener} rejects a CLIENTBOUND mismatch.</li>
+ *   <li>a real (in-memory) {@link EmbeddedChannel} — registering this Connection
+ *       as the embedded channel's handler fires {@code channelActive}, setting
+ *       {@code this.channel} so {@code placeNewPlayer} has a channel to work on.</li>
  * </ul>
- * Outbound packets are still discarded by the {@code send} override (the
- * embedded channel is never written to, so it never buffers/leaks), and the
- * keep-alive timeout is neutralised via the no-op {@code disconnect} (a fake
- * player never answers keep-alive). Lifecycle is governed by
- * {@code CompanionLifecycle}, not by connection state.
+ * Outbound packets are still discarded by the {@code send} override (the embedded
+ * channel is never written to, so it never buffers/leaks), and the keep-alive
+ * timeout is neutralised via the no-op {@code disconnect}. Lifecycle is governed
+ * by {@code CompanionLifecycle}, not by connection state.
+ *
+ * <p>1.20.1 predates the configuration phase, so {@code setListener} does no
+ * channel-protocol validation — the bare embedded channel is enough (no protocol
+ * attribute seeding needed, unlike 1.20.4+).
  */
 @com.dwinovo.numen.api.Internal
 public final class FakeConnection extends Connection {
 
     public FakeConnection() {
         super(PacketFlow.SERVERBOUND);
-        // Registering this Connection (a netty inbound handler) as the embedded
-        // channel's handler fires channelActive → sets this.channel, so the
-        // pipeline setup inside placeNewPlayer has a channel to work on.
+        // channelActive (fired by registering this handler) sets this.channel.
         new EmbeddedChannel(this);
     }
 
     /** Discard every outbound packet — there is no client to receive it.
-     *  The 1-arg and 2-arg {@code send} overloads route through this one. */
+     *  1.20.1's {@code send(Packet)} routes through this 2-arg overload. */
     @Override
-    public void send(Packet<?> packet, PacketSendListener listener, boolean flush) {
+    public void send(Packet<?> packet, PacketSendListener listener) {
         // no-op: drop it on the floor (no channel, no pendingActions growth)
-    }
-
-    /** Vanilla queues these until "connected"; we never connect, so run nothing. */
-    @Override
-    public void runOnceConnected(Consumer<Connection> action) {
-        // no-op
     }
 
     /**
      * Report live so player ticking / chunk tracking proceed as for a real
-     * player. Safe because every channel-dereferencing path (send, tick,
-     * flushChannel) is overridden to no-op below, so the null channel is never
-     * touched.
+     * player. Safe because every channel-dereferencing path (send, tick) is
+     * overridden to no-op, so the null channel is never touched.
      */
     @Override
     public boolean isConnected() {
@@ -77,8 +68,7 @@ public final class FakeConnection extends Connection {
         // no-op
     }
 
-    /** Neutralise the keep-alive timeout (and any other) disconnect. 1.20.6 has only the
-     *  Component overload (DisconnectionDetails is 1.21+). */
+    /** Neutralise the keep-alive timeout (and any other) disconnect. */
     @Override
     public void disconnect(Component message) {
         // no-op: the companion is removed via CompanionLifecycle, never by the wire
@@ -86,11 +76,6 @@ public final class FakeConnection extends Connection {
 
     @Override
     public void handleDisconnection() {
-        // no-op
-    }
-
-    @Override
-    public void flushChannel() {
         // no-op
     }
 
