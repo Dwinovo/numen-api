@@ -96,6 +96,12 @@ public final class NumenForgeClient {
         // brain can call them.
         com.dwinovo.numen.mcp.client.McpClientManager.initClient(numenConfigRoot);
 
+        // MCP server: the other direction — a loopback MCP server letting an external
+        // agent drive companions directly, bypassing the built-in brain.
+        // Off unless enabled in config/numen/mcp_server.json.
+        com.dwinovo.numen.mcp.server.NumenMcp.initClient(
+                Minecraft.getInstance().gameDirectory.toPath().resolve("config"));
+
         event.registerReloadListener((ResourceManagerReloadListener) rm -> {
             SkillRegistry.instance().scan(skillsDir);
         });

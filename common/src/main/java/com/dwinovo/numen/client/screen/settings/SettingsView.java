@@ -63,7 +63,7 @@ public final class SettingsView {
     }
 
     /** The config hub's sections, in nav order. */
-    private enum Section { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, THEME }
+    private enum Section { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, STT, THEME }
 
     // ---- layout constants (mirror the screen's) ----
     private static final int PAD = 8;
@@ -156,6 +156,12 @@ public final class SettingsView {
     private EditBox mcpNameInput, mcpTargetInput, mcpHeaderInput;
     private String mcpDeletePending;          // non-null = showing the delete-confirm bar for this server
     private String mcpEditOriginal;           // non-null = the add-form is EDITING this server (replace on save)
+
+    // STT section
+    private EditBox sttKeyInput, sttBaseUrlInput, sttModelInput;
+    private Dropdown sttProviderDropdown, sttModelDropdown, sttMicDropdown;
+    private boolean sttCustomModel;
+    private String wSttProvider, wSttKey, wSttBaseUrl, wSttModel, wSttMic;
 
     private long savedFlashUntil;
 
@@ -300,12 +306,15 @@ public final class SettingsView {
         skinNameInput = null;
         skinVariantDropdown = null;
         proxyIpInput = proxyPortInput = null;
+        sttKeyInput = sttBaseUrlInput = sttModelInput = null;
+        sttProviderDropdown = sttModelDropdown = sttMicDropdown = null;
     }
 
     private void selectSection(Section s) {
         if (s == section) return;
         section = s;
         settingsScroll = 0;
+        wSttProvider = null;   // re-seed STT form from saved config on entry
         if (s == Section.PERSONA) {
             // 人设是目录里的 .md 文件:进页先重扫,外部编辑器的修改即时可见。
             PersonaLibrary.instance().reload();
@@ -425,6 +434,7 @@ public final class SettingsView {
                 else buildSkinListWidgets();
             }
             case PROXY -> buildProxyWidgets();
+            case STT -> buildSttWidgets();
             case THEME -> { /* no widgets — plain click rows */ }
         }
     }
@@ -451,6 +461,124 @@ public final class SettingsView {
                     NumenLlmClient.reset();
                     savedFlashUntil = System.currentTimeMillis() + 1500;
                 }).primary());
+    }
+
+    // ---- Voice input (STT) section: provider dropdown → prefilled base/model, mic dropdown ----
+
+    private void buildSttWidgets() {
+        int x = secX(), w = secW();
+        int fy = secY0();
+        INumenConfig cfg = Services.CONFIG;
+        if (wSttProvider == null) {   // seed working fields from config on section entry
+            wSttProvider = cfg.getSttProvider();
+            wSttKey = cfg.getSttApiKey();
+            wSttBaseUrl = cfg.getSttBaseUrl();
+            wSttModel = cfg.getSttModel();
+            wSttMic = cfg.getSttMicrophone();
+            com.dwinovo.numen.client.stt.SttProviders.Option seed =
+                    com.dwinovo.numen.client.stt.SttProviders.byId(wSttProvider);
+            sttCustomModel = seed.models().isEmpty() || !seed.models().contains(wSttModel);
+        }
+        com.dwinovo.numen.client.stt.SttProviders.Option opt =
+                com.dwinovo.numen.client.stt.SttProviders.byId(wSttProvider);
+        sttProviderDropdown = new Dropdown(sttProviderItems(), opt.id());
+        sttProviderDropdown.setBounds(x, fy + 25, w, 18);
+        sttProviderDropdown.setDropBottom(top() + panelH() - 2);
+        sttKeyInput = field(x, fy + 25 + SET_SP, w, 256, wSttKey);
+        // Model row: provider's known models as a dropdown (+ 自定义 → free text).
+        int modelY = fy + 25 + 2 * SET_SP;
+        if (sttCustomModel || opt.models().isEmpty()) {
+            sttModelDropdown = null;
+            boolean hasModels = !opt.models().isEmpty();
+            sttModelInput = field(x, modelY, hasModels ? w - 20 : w, 128, wSttModel);
+            if (hasModels) {
+                host.add(new SimpleButton(x + w - 18, modelY, 18, 18, Component.literal("▾"),
+                        b -> { preserveSttForm(); sttCustomModel = false; host.rebuild(); }));
+            }
+        } else {
+            sttModelInput = null;
+            String sel = opt.models().contains(wSttModel) ? wSttModel : opt.models().get(0);
+            sttModelDropdown = new Dropdown(sttModelItems(opt), sel);
+            sttModelDropdown.setBounds(x, modelY, w, 18);
+            sttModelDropdown.setDropBottom(top() + panelH() - 2);
+        }
+        sttBaseUrlInput = field(x, fy + 25 + 3 * SET_SP, w, 256, wSttBaseUrl);
+        sttMicDropdown = new Dropdown(sttMicItems(), wSttMic == null ? "" : wSttMic);
+        sttMicDropdown.setBounds(x, fy + 25 + 4 * SET_SP, w, 18);
+        sttMicDropdown.setDropBottom(top() + panelH() - 2);
+        host.add(new SimpleButton(left() + panelW() - PAD - 64, top() + panelH() - PAD - 18, 64, 18,
+                Component.translatable("numen.gui.settings.save"), b -> {
+                    String sttModel = sttModelDropdown != null
+                            && !CUSTOM_MODEL.equals(sttModelDropdown.selectedId())
+                            ? sttModelDropdown.selectedId()
+                            : (sttModelInput != null ? sttModelInput.getValue().trim() : wSttModel);
+                    cfg.setSttProvider(sttProviderDropdown.selectedId());
+                    cfg.setSttApiKey(sttKeyInput.getValue().trim());
+                    cfg.setSttModel(sttModel);
+                    cfg.setSttBaseUrl(sttBaseUrlInput.getValue().trim());
+                    cfg.setSttMicrophone(sttMicDropdown.selectedId());
+                    cfg.save();
+                    savedFlashUntil = System.currentTimeMillis() + 1500;
+                }).primary());
+    }
+
+    private List<Dropdown.Item> sttProviderItems() {
+        List<Dropdown.Item> out = new ArrayList<>();
+        for (com.dwinovo.numen.client.stt.SttProviders.Option o
+                : com.dwinovo.numen.client.stt.SttProviders.all()) {
+            out.add(new Dropdown.Item(o.id(), o.displayName()));
+        }
+        return out;
+    }
+
+    private List<Dropdown.Item> sttMicItems() {
+        List<Dropdown.Item> out = new ArrayList<>();
+        out.add(new Dropdown.Item("", I18n.get(ModLanguageData.Keys.STT_MIC_DEFAULT)));
+        for (String name : com.dwinovo.numen.client.stt.MicrophoneManager.deviceNames()) {
+            out.add(new Dropdown.Item(name, name));
+        }
+        return out;
+    }
+
+    private List<Dropdown.Item> sttModelItems(com.dwinovo.numen.client.stt.SttProviders.Option o) {
+        List<Dropdown.Item> items = new ArrayList<>();
+        for (String m : o.models()) {
+            items.add(new Dropdown.Item(m, m));
+        }
+        items.add(new Dropdown.Item(CUSTOM_MODEL, I18n.get("numen.settings.custom_model")));
+        return items;
+    }
+
+    /** Keep typed key/model/baseUrl across a rebuild triggered by a dropdown. */
+    private void preserveSttForm() {
+        if (sttKeyInput != null) wSttKey = sttKeyInput.getValue();
+        if (sttBaseUrlInput != null) wSttBaseUrl = sttBaseUrlInput.getValue();
+        if (sttModelInput != null) {
+            wSttModel = sttModelInput.getValue();
+        } else if (sttModelDropdown != null && !CUSTOM_MODEL.equals(sttModelDropdown.selectedId())) {
+            wSttModel = sttModelDropdown.selectedId();
+        }
+    }
+
+    /** Provider changed → adapt model + base URL to the pick's preset defaults (still editable). */
+    private void adaptToSttProvider(String id) {
+        wSttProvider = id;
+        com.dwinovo.numen.client.stt.SttProviders.Option o =
+                com.dwinovo.numen.client.stt.SttProviders.byId(id);
+        sttCustomModel = o.models().isEmpty();   // custom provider → free-text model
+        wSttModel = o.defaultModel();
+        wSttBaseUrl = o.defaultBaseUrl();
+    }
+
+    private void renderSttSection(GuiGraphics g) {
+        int x = secX();
+        int fy = secY0();
+        txt(g, Component.translatable(ModLanguageData.Keys.STT_TITLE), x, fy - 2, TXT);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_PROVIDER), x, fy + 14, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_API_KEY), x, fy + 14 + SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_MODEL), x, fy + 14 + 2 * SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_BASE_URL), x, fy + 14 + 3 * SET_SP, TXT_MUTED);
+        txt(g, Component.translatable(ModLanguageData.Keys.STT_MICROPHONE), x, fy + 14 + 4 * SET_SP, TXT_MUTED);
     }
 
     private void renderProxySection(GuiGraphics g) {
@@ -1480,6 +1608,7 @@ public final class SettingsView {
             case VOICE -> renderVoiceSection(g, mouseX, mouseY);
             case SKIN -> renderSkinSection(g, mouseX, mouseY);
             case PROXY -> renderProxySection(g);
+            case STT -> renderSttSection(g);
             case THEME -> renderThemeSection(g, mouseX, mouseY);
         }
         // 删除确认改模态:列表照常渲染作背景,暗幕+确认卡压在上面(按钮走 widget
@@ -1606,6 +1735,7 @@ public final class SettingsView {
                 I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona"),
                 I18n.get(ModLanguageData.Keys.VOICE_TITLE),
                 I18n.get(ModLanguageData.Keys.SKIN_TITLE),
+                I18n.get(ModLanguageData.Keys.STT_NAV),
                 I18n.get("numen.settings.nav.theme")};
         int navX = left() + PAD;
         int y = secY0();
@@ -1944,6 +2074,39 @@ public final class SettingsView {
                 return true;
             }
         }
+        // STT 三个下拉:服务商换了就按预设改填模型/地址;互斥收起其余两个。
+        if (section == Section.STT && sttProviderDropdown != null) {
+            String beforeStt = sttProviderDropdown.selectedId();
+            if (sttProviderDropdown.mouseClicked(mouseX, mouseY)) {
+                if (sttModelDropdown != null) sttModelDropdown.close();
+                if (sttMicDropdown != null) sttMicDropdown.close();
+                String selStt = sttProviderDropdown.selectedId();
+                if (!selStt.equals(beforeStt)) {   // provider changed → prefill model + base URL
+                    preserveSttForm();
+                    adaptToSttProvider(selStt);
+                    host.rebuild();
+                }
+                return true;
+            }
+        }
+        if (section == Section.STT && sttModelDropdown != null
+                && sttModelDropdown.mouseClicked(mouseX, mouseY)) {
+            if (sttProviderDropdown != null) sttProviderDropdown.close();
+            if (sttMicDropdown != null) sttMicDropdown.close();
+            if (CUSTOM_MODEL.equals(sttModelDropdown.selectedId())) {   // 自定义 → free text
+                preserveSttForm();
+                sttCustomModel = true;
+                wSttModel = "";
+                host.rebuild();
+            }
+            return true;
+        }
+        if (section == Section.STT && sttMicDropdown != null
+                && sttMicDropdown.mouseClicked(mouseX, mouseY)) {
+            if (sttProviderDropdown != null) sttProviderDropdown.close();
+            if (sttModelDropdown != null) sttModelDropdown.close();
+            return true;
+        }
         return settingsClickedAt(mouseX, mouseY);
     }
 
@@ -2159,6 +2322,16 @@ public final class SettingsView {
                 if (provProviderDropdown != null) provProviderDropdown.render(g, font(), mouseX, mouseY);
                 if (provModelDropdown != null) provModelDropdown.render(g, font(), mouseX, mouseY);
             }
+        }
+        if (section == Section.STT) {
+            Dropdown[] sttDd = { sttProviderDropdown, sttModelDropdown, sttMicDropdown };
+            Dropdown sttOpen = null;
+            for (Dropdown d : sttDd) {
+                if (d == null) continue;
+                if (d.isOpen()) sttOpen = d;
+                else d.render(g, font(), mouseX, mouseY);
+            }
+            if (sttOpen != null) sttOpen.render(g, font(), mouseX, mouseY);   // open list overlays fields
         }
         if (section == Section.MCP && addingMcp) {
             placeholder(g, mcpNameInput, "kfc");
