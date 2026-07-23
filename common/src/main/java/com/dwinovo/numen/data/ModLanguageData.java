@@ -162,6 +162,8 @@ public final class ModLanguageData {
         adder.add("numen.settings.nav.llm", "Models");
         adder.add("numen.settings.nav.mcp", "MCP");
         adder.add("numen.settings.nav.skills", "Skills");
+        adder.add("numen.settings.nav.theme", "Theme");
+        adder.add("numen.settings.theme.title", "Theme");
         adder.add("numen.settings.nav.persona", "Persona");
         adder.add("numen.persona.title", "Personas");
         adder.add("numen.persona.empty", "None · click ＋ New (top-right)");
@@ -365,6 +367,8 @@ public final class ModLanguageData {
         adder.add("numen.settings.nav.llm", "模型接入");
         adder.add("numen.settings.nav.mcp", "MCP");
         adder.add("numen.settings.nav.skills", "技能");
+        adder.add("numen.settings.nav.theme", "主题");
+        adder.add("numen.settings.theme.title", "主题");
         adder.add("numen.settings.nav.persona", "人设");
         adder.add("numen.persona.title", "人设库");
         adder.add("numen.persona.empty", "无 · 点右上「＋ 新建」");
