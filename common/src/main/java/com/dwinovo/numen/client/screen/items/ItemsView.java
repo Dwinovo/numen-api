@@ -32,7 +32,7 @@ public final class ItemsView {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
 
     private static ResourceLocation spr(String name) {
-        return ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, name);
+        return new ResourceLocation(Constants.MOD_ID, name);
     }
     private static final ResourceLocation SLOT_SPRITE = spr("slot");
     private static final ResourceLocation SLOT_ALT = spr("slot_alt");        // checkerboard
@@ -119,10 +119,10 @@ public final class ItemsView {
         int units = Math.max(1, (int) Math.ceil(max / 2f));
         for (int i = 0; i < units; i++) {
             int ix = x + i * ICON_STEP;
-            g.blitSprite(empty, ix, y, ICON, ICON);
+            com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, empty, ix, y, ICON, ICON);
             float v = value - i * 2f;
-            if (v >= 2f)      g.blitSprite(full, ix, y, ICON, ICON);
-            else if (v >= 1f) g.blitSprite(half, ix, y, ICON, ICON);
+            if (v >= 2f)      com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, full, ix, y, ICON, ICON);
+            else if (v >= 1f) com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, half, ix, y, ICON, ICON);
         }
     }
 
@@ -130,16 +130,19 @@ public final class ItemsView {
      *  vanilla player renderer draws it for free. Sits in a recessed socket (slot_alt stretched). */
     private static void renderPortrait(GuiGraphics g, AbstractClientPlayer e,
                                        int x, int y, int w, int h, int mouseX, int mouseY) {
-        g.blitSprite(SLOT_ALT, x, y, w, h);
+        com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, SLOT_ALT, x, y, w, h);
         if (e == null) return;
         int scale = (int) (h * 0.45f);
+        // 1.20.1 签名:定位点 + 相对鼠标偏移(1.21 的包围盒版本尚不存在)。
+        int posX = x + w / 2;
+        int posY = y + h - 4;
         net.minecraft.client.gui.screens.inventory.InventoryScreen.renderEntityInInventoryFollowsMouse(
-                g, x + 2, y + 2, x + w - 2, y + h - 2, scale, 0.0625f,
-                (float) mouseX, (float) mouseY, e);
+                g, posX, posY, scale,
+                (float) posX - mouseX, (float) (posY - h * 0.6f) - mouseY, e);
     }
 
     private static void slotBg(GuiGraphics g, ResourceLocation sprite, int x, int y) {
-        g.blitSprite(sprite, x, y, 16, 16);
+        com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, sprite, x, y, 16, 16);
     }
 
     private static void stackOn(GuiGraphics g, Font font, ItemStack st, int x, int y, int mouseX, int mouseY) {

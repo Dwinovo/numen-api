@@ -30,13 +30,31 @@ public final class NumenForgeClient {
 
     /** Wire every client listener. {@code modBus} is the mod event bus from the constructor. */
     public static void init(IEventBus modBus) {
+        // 读回上次选择的 GUI 主题(config/numen/ui.json)。
+        com.dwinovo.numen.client.screen.UiTheme.init(
+                Minecraft.getInstance().gameDirectory.toPath().resolve("config").resolve("numen"));
         // Mod bus — registration events.
         modBus.addListener(NumenForgeClient::registerKeyMappings);
         modBus.addListener(NumenForgeClient::registerGuiOverlays);
         modBus.addListener(NumenForgeClient::registerReloadListeners);
+        modBus.addListener(NumenForgeClient::registerShaders);
         // Game bus — per-tick / world-render / disconnect.
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onLoggingOut);
+    }
+
+    static void registerShaders(net.minecraftforge.client.event.RegisterShadersEvent event) {
+        // GUI 圆角 SDF shader;加载失败仅告警——RoundRect 会自动降级成方角 fill。
+        try {
+            event.registerShader(new net.minecraft.client.renderer.ShaderInstance(
+                            event.getResourceProvider(),
+                            new net.minecraft.resources.ResourceLocation(
+                                    Constants.MOD_ID, "rendertype_round_rect"),
+                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR),
+                    com.dwinovo.numen.client.ui.RoundRect::setShader);
+        } catch (Exception e) {
+            Constants.LOG.warn("round rect shader failed to load, falling back to square corners", e);
+        }
     }
 
     static void registerKeyMappings(RegisterKeyMappingsEvent event) {
@@ -55,6 +73,7 @@ public final class NumenForgeClient {
 
     static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
+        com.dwinovo.numen.client.agent.KnownSkins.clear();
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
     }

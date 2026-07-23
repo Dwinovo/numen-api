@@ -70,7 +70,7 @@ public final class SimpleButton extends Button {
             int s = Math.min(w, h) >= 16 ? 11 : 9;
             g.setColor(((labelColor >> 16) & 0xFF) / 255f, ((labelColor >> 8) & 0xFF) / 255f,
                     (labelColor & 0xFF) / 255f, 1f);
-            g.blitSprite(icon, x + (w - s) / 2, y + (h - s) / 2, s, s);
+            com.dwinovo.numen.client.screen.GuiCompat.blitSprite(g, icon, x + (w - s) / 2, y + (h - s) / 2, s, s);
             g.setColor(1f, 1f, 1f, 1f);
             return;
         }

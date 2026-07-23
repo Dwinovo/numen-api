@@ -54,7 +54,7 @@ public class NumenFabricClient implements ClientModInitializer {
                 .register(context -> {
                     try {
                         context.register(
-                                ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "rendertype_round_rect"),
+                                new ResourceLocation(Constants.MOD_ID, "rendertype_round_rect"),
                                 com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR,
                                 com.dwinovo.numen.client.ui.RoundRect::setShader);
                     } catch (Exception e) {

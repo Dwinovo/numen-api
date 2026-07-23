@@ -63,7 +63,7 @@ public final class SettingsView {
     }
 
     /** The config hub's sections, in nav order. */
-    private enum Section { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, STT, THEME }
+    private enum Section { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, THEME }
 
     // ---- layout constants (mirror the screen's) ----
     private static final int PAD = 8;
@@ -157,11 +157,6 @@ public final class SettingsView {
     private String mcpDeletePending;          // non-null = showing the delete-confirm bar for this server
     private String mcpEditOriginal;           // non-null = the add-form is EDITING this server (replace on save)
 
-    // STT section
-    private EditBox sttKeyInput, sttBaseUrlInput, sttModelInput;
-    private Dropdown sttProviderDropdown, sttModelDropdown, sttMicDropdown;
-    private boolean sttCustomModel;
-    private String wSttProvider, wSttKey, wSttBaseUrl, wSttModel, wSttMic;
     private long savedFlashUntil;
 
     public SettingsView(Host host) {
@@ -293,8 +288,6 @@ public final class SettingsView {
 
     /** Null every widget reference (the screen just cleared the actual widget lists). */
     public void clearWidgets() {
-        sttKeyInput = sttBaseUrlInput = sttModelInput = null;
-        sttProviderDropdown = sttModelDropdown = sttMicDropdown = null;
         mcpNameInput = mcpTargetInput = mcpHeaderInput = null;
         personaNameInput = null;
         personaTextArea = null;
@@ -313,7 +306,6 @@ public final class SettingsView {
         if (s == section) return;
         section = s;
         settingsScroll = 0;
-        wSttProvider = null;   // re-seed STT form from saved config on entry
         if (s == Section.PERSONA) {
             // 人设是目录里的 .md 文件:进页先重扫,外部编辑器的修改即时可见。
             PersonaLibrary.instance().reload();
@@ -433,7 +425,6 @@ public final class SettingsView {
                 else buildSkinListWidgets();
             }
             case PROXY -> buildProxyWidgets();
-            case STT -> buildSttWidgets();
             case THEME -> { /* no widgets — plain click rows */ }
         }
     }
@@ -460,124 +451,6 @@ public final class SettingsView {
                     NumenLlmClient.reset();
                     savedFlashUntil = System.currentTimeMillis() + 1500;
                 }).primary());
-    }
-
-    // ---- Voice input (STT) section: provider dropdown → prefilled base/model, mic dropdown ----
-
-    private void buildSttWidgets() {
-        int x = secX(), w = secW();
-        int fy = secY0();
-        INumenConfig cfg = Services.CONFIG;
-        if (wSttProvider == null) {   // seed working fields from config on section entry
-            wSttProvider = cfg.getSttProvider();
-            wSttKey = cfg.getSttApiKey();
-            wSttBaseUrl = cfg.getSttBaseUrl();
-            wSttModel = cfg.getSttModel();
-            wSttMic = cfg.getSttMicrophone();
-            com.dwinovo.numen.client.stt.SttProviders.Option seed =
-                    com.dwinovo.numen.client.stt.SttProviders.byId(wSttProvider);
-            sttCustomModel = seed.models().isEmpty() || !seed.models().contains(wSttModel);
-        }
-        com.dwinovo.numen.client.stt.SttProviders.Option opt =
-                com.dwinovo.numen.client.stt.SttProviders.byId(wSttProvider);
-        sttProviderDropdown = new Dropdown(sttProviderItems(), opt.id());
-        sttProviderDropdown.setBounds(x, fy + 25, w, 18);
-        sttProviderDropdown.setDropBottom(top() + panelH() - 2);
-        sttKeyInput = field(x, fy + 25 + SET_SP, w, 256, wSttKey);
-        // Model row: provider's known models as a dropdown (+ 自定义 → free text).
-        int modelY = fy + 25 + 2 * SET_SP;
-        if (sttCustomModel || opt.models().isEmpty()) {
-            sttModelDropdown = null;
-            boolean hasModels = !opt.models().isEmpty();
-            sttModelInput = field(x, modelY, hasModels ? w - 20 : w, 128, wSttModel);
-            if (hasModels) {
-                host.add(new SimpleButton(x + w - 18, modelY, 18, 18, Component.literal("▾"),
-                        b -> { preserveSttForm(); sttCustomModel = false; host.rebuild(); }));
-            }
-        } else {
-            sttModelInput = null;
-            String sel = opt.models().contains(wSttModel) ? wSttModel : opt.models().get(0);
-            sttModelDropdown = new Dropdown(sttModelItems(opt), sel);
-            sttModelDropdown.setBounds(x, modelY, w, 18);
-            sttModelDropdown.setDropBottom(top() + panelH() - 2);
-        }
-        sttBaseUrlInput = field(x, fy + 25 + 3 * SET_SP, w, 256, wSttBaseUrl);
-        sttMicDropdown = new Dropdown(sttMicItems(), wSttMic == null ? "" : wSttMic);
-        sttMicDropdown.setBounds(x, fy + 25 + 4 * SET_SP, w, 18);
-        sttMicDropdown.setDropBottom(top() + panelH() - 2);
-        host.add(new SimpleButton(left() + panelW() - PAD - 64, top() + panelH() - PAD - 18, 64, 18,
-                Component.translatable("numen.gui.settings.save"), b -> {
-                    String sttModel = sttModelDropdown != null
-                            && !CUSTOM_MODEL.equals(sttModelDropdown.selectedId())
-                            ? sttModelDropdown.selectedId()
-                            : (sttModelInput != null ? sttModelInput.getValue().trim() : wSttModel);
-                    cfg.setSttProvider(sttProviderDropdown.selectedId());
-                    cfg.setSttApiKey(sttKeyInput.getValue().trim());
-                    cfg.setSttModel(sttModel);
-                    cfg.setSttBaseUrl(sttBaseUrlInput.getValue().trim());
-                    cfg.setSttMicrophone(sttMicDropdown.selectedId());
-                    cfg.save();
-                    savedFlashUntil = System.currentTimeMillis() + 1500;
-                }).primary());
-    }
-
-    private List<Dropdown.Item> sttProviderItems() {
-        List<Dropdown.Item> out = new ArrayList<>();
-        for (com.dwinovo.numen.client.stt.SttProviders.Option o
-                : com.dwinovo.numen.client.stt.SttProviders.all()) {
-            out.add(new Dropdown.Item(o.id(), o.displayName()));
-        }
-        return out;
-    }
-
-    private List<Dropdown.Item> sttMicItems() {
-        List<Dropdown.Item> out = new ArrayList<>();
-        out.add(new Dropdown.Item("", I18n.get(ModLanguageData.Keys.STT_MIC_DEFAULT)));
-        for (String name : com.dwinovo.numen.client.stt.MicrophoneManager.deviceNames()) {
-            out.add(new Dropdown.Item(name, name));
-        }
-        return out;
-    }
-
-    private List<Dropdown.Item> sttModelItems(com.dwinovo.numen.client.stt.SttProviders.Option o) {
-        List<Dropdown.Item> items = new ArrayList<>();
-        for (String m : o.models()) {
-            items.add(new Dropdown.Item(m, m));
-        }
-        items.add(new Dropdown.Item(CUSTOM_MODEL, I18n.get("numen.settings.custom_model")));
-        return items;
-    }
-
-    /** Keep typed key/model/baseUrl across a rebuild triggered by a dropdown. */
-    private void preserveSttForm() {
-        if (sttKeyInput != null) wSttKey = sttKeyInput.getValue();
-        if (sttBaseUrlInput != null) wSttBaseUrl = sttBaseUrlInput.getValue();
-        if (sttModelInput != null) {
-            wSttModel = sttModelInput.getValue();
-        } else if (sttModelDropdown != null && !CUSTOM_MODEL.equals(sttModelDropdown.selectedId())) {
-            wSttModel = sttModelDropdown.selectedId();
-        }
-    }
-
-    /** Provider changed → adapt model + base URL to the pick's preset defaults (still editable). */
-    private void adaptToSttProvider(String id) {
-        wSttProvider = id;
-        com.dwinovo.numen.client.stt.SttProviders.Option o =
-                com.dwinovo.numen.client.stt.SttProviders.byId(id);
-        sttCustomModel = o.models().isEmpty();   // custom provider → free-text model
-        wSttModel = o.defaultModel();
-        wSttBaseUrl = o.defaultBaseUrl();
-    }
-
-    private void renderSttSection(GuiGraphics g) {
-        int x = secX();
-        int fy = secY0();
-        txt(g, Component.translatable(ModLanguageData.Keys.STT_TITLE), x, fy - 2, TXT);
-        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_PROVIDER), x, fy + 14, TXT_MUTED);
-        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_API_KEY), x, fy + 14 + SET_SP, TXT_MUTED);
-        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_MODEL), x, fy + 14 + 2 * SET_SP, TXT_MUTED);
-        txt(g, Component.translatable(ModLanguageData.Keys.GUI_SETTINGS_BASE_URL), x, fy + 14 + 3 * SET_SP, TXT_MUTED);
-        txt(g, Component.translatable(ModLanguageData.Keys.STT_MICROPHONE), x, fy + 14 + 4 * SET_SP, TXT_MUTED);
     }
 
     private void renderProxySection(GuiGraphics g) {
@@ -730,7 +603,7 @@ public final class SettingsView {
      */
     private void buildVoiceForm() {
         int x = fx(), w = fw();
-        voiceFormScroll = Math.clamp(voiceFormScroll, 0, maxVoiceFormScroll());
+        voiceFormScroll = net.minecraft.util.Mth.clamp(voiceFormScroll, 0, maxVoiceFormScroll());
         voiceNameInput = vclip(field(x, voiceVy(0), w, 48, wVoiceName), 0);
         // 后端下拉——召唤页人设/模型下拉同款控件;点击路由在 mouseClicked,
         // 展开列表在 render 末尾最后画(压在字段上面)。
@@ -875,7 +748,7 @@ public final class SettingsView {
         try { vol = Float.parseFloat(wVoiceVolume.trim()); }
         catch (NumberFormatException ex) { vol = 5.0f; }
         // UI 档位 1~10 → 存储增益 0.2~2.0(5 档 = 原始响度 1.0,老数据无需迁移)。
-        vol = Math.clamp(vol, 1.0f, 10.0f) / 5.0f;
+        vol = net.minecraft.util.Mth.clamp(vol, 1.0f, 10.0f) / 5.0f;
         return new com.dwinovo.numen.client.voice.VoiceLibrary.Entry(id, name,
                 wVoiceBackend,
                 wVoiceUrl.trim(), wVoiceKey.trim(), wVoiceGroup.trim(),
@@ -1006,7 +879,7 @@ public final class SettingsView {
         }
         int listY0 = voiceListY0();
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         String bound = host.uuid() != null ? lib.assignedEntry(host.uuid()) : null;
         for (int i = settingsScroll; i < list.size(); i++) {
             int ry = listY0 + (i - settingsScroll) * LIST_ROW;
@@ -1057,7 +930,7 @@ public final class SettingsView {
         var list = lib.list();
         int listY0 = voiceListY0();
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = scroll; i < list.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1085,7 +958,7 @@ public final class SettingsView {
         wVoicePrompt = nv(e.promptText());
         wVoiceLang = nv(e.textLang());
         // 存储的是增益(0.2~2.0),表单显示 1~10 档。
-        wVoiceVolume = String.valueOf(Math.round(Math.clamp(e.volume(), 0.2f, 2.0f) * 5.0f));
+        wVoiceVolume = String.valueOf(Math.round(net.minecraft.util.Mth.clamp(e.volume(), 0.2f, 2.0f) * 5.0f));
         voiceMsg = null;
         host.rebuild();
     }
@@ -1500,7 +1373,7 @@ public final class SettingsView {
         }
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = settingsScroll; i < list.size(); i++) {
             int ry = listY0 + (i - settingsScroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1540,7 +1413,7 @@ public final class SettingsView {
         var list = lib.list();
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = scroll; i < list.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1607,7 +1480,6 @@ public final class SettingsView {
             case VOICE -> renderVoiceSection(g, mouseX, mouseY);
             case SKIN -> renderSkinSection(g, mouseX, mouseY);
             case PROXY -> renderProxySection(g);
-            case STT -> renderSttSection(g);
             case THEME -> renderThemeSection(g, mouseX, mouseY);
         }
         // 删除确认改模态:列表照常渲染作背景,暗幕+确认卡压在上面(按钮走 widget
@@ -1663,7 +1535,7 @@ public final class SettingsView {
         }
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = settingsScroll; i < list.size(); i++) {
             int ry = listY0 + (i - settingsScroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1698,7 +1570,7 @@ public final class SettingsView {
         var list = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().list();
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = scroll; i < list.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1734,7 +1606,6 @@ public final class SettingsView {
                 I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona"),
                 I18n.get(ModLanguageData.Keys.VOICE_TITLE),
                 I18n.get(ModLanguageData.Keys.SKIN_TITLE),
-                I18n.get(ModLanguageData.Keys.STT_NAV),
                 I18n.get("numen.settings.nav.theme")};
         int navX = left() + PAD;
         int y = secY0();
@@ -1783,7 +1654,7 @@ public final class SettingsView {
         }
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
         for (int i = settingsScroll; i < servers.size(); i++) {
             int row = i - settingsScroll;
             int ry = listY0 + row * LIST_ROW;
@@ -1870,7 +1741,7 @@ public final class SettingsView {
         }
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
         for (int i = settingsScroll; i < skills.size(); i++) {
             int row = i - settingsScroll;
             int ry = listY0 + row * LIST_ROW;
@@ -1939,7 +1810,7 @@ public final class SettingsView {
         }
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = settingsScroll; i < list.size(); i++) {
             int ry = listY0 + (i - settingsScroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -1975,7 +1846,7 @@ public final class SettingsView {
         var list = lib.list();
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, list.size() - visible));
         for (int i = scroll; i < list.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -2006,7 +1877,7 @@ public final class SettingsView {
         var skills = new ArrayList<>(reg.all());
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, skills.size() - visible));
         for (int i = scroll; i < skills.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -2051,38 +1922,6 @@ public final class SettingsView {
                 wProvModel = "";
                 host.rebuild();
             }
-            return true;
-        }
-        if (section == Section.STT && sttProviderDropdown != null) {
-            String beforeStt = sttProviderDropdown.selectedId();
-            if (sttProviderDropdown.mouseClicked(mouseX, mouseY)) {
-                if (sttModelDropdown != null) sttModelDropdown.close();
-                if (sttMicDropdown != null) sttMicDropdown.close();
-                String selStt = sttProviderDropdown.selectedId();
-                if (!selStt.equals(beforeStt)) {   // provider changed → prefill model + base URL
-                    preserveSttForm();
-                    adaptToSttProvider(selStt);
-                    host.rebuild();
-                }
-                return true;
-            }
-        }
-        if (section == Section.STT && sttModelDropdown != null
-                && sttModelDropdown.mouseClicked(mouseX, mouseY)) {
-            if (sttProviderDropdown != null) sttProviderDropdown.close();
-            if (sttMicDropdown != null) sttMicDropdown.close();
-            if (CUSTOM_MODEL.equals(sttModelDropdown.selectedId())) {   // 自定义 → free text
-                preserveSttForm();
-                sttCustomModel = true;
-                wSttModel = "";
-                host.rebuild();
-            }
-            return true;
-        }
-        if (section == Section.STT && sttMicDropdown != null
-                && sttMicDropdown.mouseClicked(mouseX, mouseY)) {
-            if (sttProviderDropdown != null) sttProviderDropdown.close();
-            if (sttModelDropdown != null) sttModelDropdown.close();
             return true;
         }
         // 声线表单的后端下拉:选型变了就随之刷新字段区(typed 值经 preserve 存活)。
@@ -2153,7 +1992,7 @@ public final class SettingsView {
         var servers = com.dwinovo.numen.mcp.client.McpClientManager.servers();
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        int scroll = Math.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
+        int scroll = net.minecraft.util.Mth.clamp(settingsScroll, 0, Math.max(0, servers.size() - visible));
         for (int i = scroll; i < servers.size(); i++) {
             int ry = listY0 + (i - scroll) * LIST_ROW;
             if (ry + LIST_ROW > secBottom()) break;
@@ -2225,7 +2064,7 @@ public final class SettingsView {
         if (section == Section.VOICE
                 && addingVoice && mx >= cardX0() && maxVoiceFormScroll() > 0) {
             preserveVoiceForm();
-            voiceFormScroll = Math.clamp((long) (voiceFormScroll - sy * 16), 0, maxVoiceFormScroll());
+            voiceFormScroll = net.minecraft.util.Mth.clamp((int) (voiceFormScroll - sy * 16), 0, maxVoiceFormScroll());
             host.rebuild();
             return true;
         }
@@ -2246,7 +2085,7 @@ public final class SettingsView {
         };
         int listY0 = secY0() + 14;
         int visible = Math.max(1, (secBottom() - listY0) / LIST_ROW);
-        settingsScroll = Math.clamp((long) (settingsScroll - sy), 0, Math.max(0, count - visible));
+        settingsScroll = net.minecraft.util.Mth.clamp((int) (settingsScroll - sy), 0, Math.max(0, count - visible));
         return true;
     }
 
@@ -2320,16 +2159,6 @@ public final class SettingsView {
                 if (provProviderDropdown != null) provProviderDropdown.render(g, font(), mouseX, mouseY);
                 if (provModelDropdown != null) provModelDropdown.render(g, font(), mouseX, mouseY);
             }
-        }
-        if (section == Section.STT) {
-            Dropdown[] sttDd = { sttProviderDropdown, sttModelDropdown, sttMicDropdown };
-            Dropdown sttOpen = null;
-            for (Dropdown d : sttDd) {
-                if (d == null) continue;
-                if (d.isOpen()) sttOpen = d;
-                else d.render(g, font(), mouseX, mouseY);
-            }
-            if (sttOpen != null) sttOpen.render(g, font(), mouseX, mouseY);   // open list overlays fields
         }
         if (section == Section.MCP && addingMcp) {
             placeholder(g, mcpNameInput, "kfc");
