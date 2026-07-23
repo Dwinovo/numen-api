@@ -360,7 +360,7 @@ public final class NumenScreen extends Screen {
                 b -> { summoning = false; rebuild(); }));
         add(new SimpleButton(bx + bw + gap, y0 + 162, bw, 18,
                 Component.translatable(ModLanguageData.Keys.SUMMON_CREATE),
-                b -> doSummon()));
+                b -> doSummon()).primary());
         setInitialFocus(summonInput);
     }
 
@@ -471,17 +471,34 @@ public final class NumenScreen extends Screen {
     }
 
 
-    private void buildChatWidgets() {
-        int inputY = top + panelH - INPUT_H - PAD;
-        int compactW = 26;
-        int sendW = 42;
-        int stopW = 22;
-        int inX = left + PAD + compactW + 4;
-        int inW = panelW - PAD * 2 - compactW - sendW - stopW - 12;
+    private static net.minecraft.resources.ResourceLocation chatIcon(String n) {
+        return net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+                com.dwinovo.numen.Constants.MOD_ID, n);
+    }
+    private static final net.minecraft.resources.ResourceLocation ICON_SEND = chatIcon("icon_send");
+    private static final net.minecraft.resources.ResourceLocation ICON_MIC = chatIcon("icon_mic");
+    private static final net.minecraft.resources.ResourceLocation ICON_STOP = chatIcon("icon_stop");
+    private static final net.minecraft.resources.ResourceLocation ICON_COMPACT = chatIcon("icon_compact");
 
-        compactButton = add(new SimpleButton(left + PAD, inputY, compactW, INPUT_H,
-                Component.literal("⤬"), b -> loop().requestCompact()));
+    private void buildChatWidgets() {
+        // 聊天行四键全部图标化(高频动作,含义靠图标 + 悬停 tooltip,不再占文字宽度)。
+        int inputY = top + panelH - INPUT_H - PAD;
+        int btnW = 22;
+        int inX = left + PAD + (btnW + 4) * 2;
+        int inW = panelW - PAD * 2 - btnW * 4 - 20;
+
+        compactButton = add(new SimpleButton(left + PAD, inputY, btnW, INPUT_H,
+                Component.translatable("numen.chat.tip.compact"), b -> loop().requestCompact())
+                .icon(ICON_COMPACT));
+        compactButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.translatable("numen.chat.tip.compact")));
         compactButton.active = loop().canCompact();
+
+        micButton = add(new SimpleButton(left + PAD + btnW + 4, inputY, btnW, INPUT_H,
+                Component.translatable("numen.chat.tip.mic"), b -> onMicToggle())
+                .icon(ICON_MIC));
+        micButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.translatable("numen.chat.tip.mic")));
 
         input = new FlatEditBox(font, inX + FIELD_INSET_X, inputY + FIELD_INSET_Y,
                 inW - FIELD_INSET_X * 2, INPUT_H - FIELD_INSET_Y * 2, Component.literal("numen.chat.input"));
@@ -496,12 +513,46 @@ public final class NumenScreen extends Screen {
         add(input);
         setInitialFocus(input);
 
-        sendButton = add(new SimpleButton(inX + inW + 4, inputY, sendW, INPUT_H,
-                Component.translatable("numen.chat.send"), b -> onSend()));
+        sendButton = add(new SimpleButton(inX + inW + 4, inputY, btnW, INPUT_H,
+                Component.translatable("numen.chat.send"), b -> onSend())
+                .icon(ICON_SEND).primary());
+        sendButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.translatable("numen.chat.send")));
 
-        stopButton = add(new SimpleButton(inX + inW + 4 + sendW + 4, inputY, stopW, INPUT_H,
-                Component.literal("■"), b -> loop().abort()));
+        stopButton = add(new SimpleButton(inX + inW + 4 + btnW + 4, inputY, btnW, INPUT_H,
+                Component.translatable("numen.chat.tip.stop"), b -> loop().abort())
+                .icon(ICON_STOP));
+        stopButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.translatable("numen.chat.tip.stop")));
         stopButton.active = loop().canInterrupt();
+    }
+
+    /** 正常的输入框占位文案("说点什么…, {name}");麦克风状态提示消失后用它复位。 */
+    private Component defaultChatHint() {
+        return Nb.colored(I18n.get("numen.chat.hint", name == null ? "" : name), TXT_FAINT);
+    }
+
+    /** 麦克风按钮:点击开录/再点停;转写文本(批量结尾一次、流式边说边刷)落进输入框。 */
+    private void onMicToggle() {
+        com.dwinovo.numen.client.stt.VoiceInputController.toggle(
+                Services.CONFIG,
+                text -> { if (input != null) input.setValue(text); },
+                // 状态提示(未配置/无麦克风/失败)落在输入框的 placeholder 上——眼睛正看的地方,醒目
+                // 却不写进真实输入。框里已有文字时 hint 不显示,由渲染里的底部一行兜底。
+                status -> {
+                    micNotice = status;
+                    micNoticeUntil = System.currentTimeMillis() + 4000;
+                    if (input != null && input.getValue().isEmpty()) {
+                        input.setHint(Nb.colored(status, FAIL));
+                    }
+                });
+        if (micButton != null) {
+            // 录音中图标换成停止方块,tooltip 跟着换——同一颗键,两种含义都一眼可读。
+            boolean rec = com.dwinovo.numen.client.stt.VoiceInputController.isActive();
+            micButton.icon(rec ? ICON_STOP : ICON_MIC);
+            micButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                    Component.translatable(rec ? "numen.chat.tip.mic_stop" : "numen.chat.tip.mic")));
+        }
     }
 
     private void selectTab(Tab t) {
