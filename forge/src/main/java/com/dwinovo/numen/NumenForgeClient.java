@@ -41,6 +41,16 @@ public final class NumenForgeClient {
         // Game bus — per-tick / world-render / disconnect.
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onLoggingOut);
+        MinecraftForge.EVENT_BUS.addListener(NumenForgeClient::onRenderLevel);
+    }
+
+    static void onRenderLevel(net.minecraftforge.client.event.RenderLevelStageEvent event) {
+        // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        if (event.getStage() == net.minecraftforge.client.event.RenderLevelStageEvent.Stage
+                .AFTER_TRANSLUCENT_BLOCKS) {
+            com.dwinovo.numen.client.debug.PathDebugRenderer.render(
+                    event.getPoseStack(), event.getCamera());
+        }
     }
 
     static void registerShaders(net.minecraftforge.client.event.RegisterShadersEvent event) {
@@ -76,6 +86,7 @@ public final class NumenForgeClient {
         com.dwinovo.numen.client.agent.KnownSkins.clear();
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
+        com.dwinovo.numen.client.debug.PathDebugState.clear();
     }
 
     static void registerGuiOverlays(RegisterGuiOverlaysEvent event) {

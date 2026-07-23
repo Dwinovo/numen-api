@@ -115,5 +115,11 @@ public final class NumenNetwork {
                 com.dwinovo.numen.network.payload.DismissRequestPayload.ID,
                 com.dwinovo.numen.network.payload.DismissRequestPayload::read,
                 com.dwinovo.numen.network.payload.DismissRequestPayload::handle);
+
+        // S→C: a companion's live pathing state for the debug overlay (lines/boxes).
+        Services.NETWORK.registerServerToClient(
+                com.dwinovo.numen.network.payload.PathDebugPayload.ID,
+                com.dwinovo.numen.network.payload.PathDebugPayload::read,
+                com.dwinovo.numen.network.payload.PathDebugPayload::handle);
     }
 }
