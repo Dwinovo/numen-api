@@ -32,9 +32,11 @@ import net.minecraft.network.protocol.PacketFlow;
  * timeout is neutralised via the no-op {@code disconnect}. Lifecycle is governed
  * by {@code CompanionLifecycle}, not by connection state.
  *
- * <p>1.20.1 predates the configuration phase, so {@code setListener} does no
- * channel-protocol validation — the bare embedded channel is enough (no protocol
- * attribute seeding needed, unlike 1.20.4+).
+ * <p>1.20.2 introduced the configuration phase: the packet codec now lives in
+ * channel ATTRIBUTES ({@code ATTRIBUTE_*_PROTOCOL}), and
+ * {@code ServerGamePacketListenerImpl}'s ctor reads them immediately — a bare
+ * embedded channel NPEs there, so both attributes are seeded with the PLAY
+ * codec below.
  */
 @com.dwinovo.numen.api.Internal
 public final class FakeConnection extends Connection {
@@ -42,7 +44,13 @@ public final class FakeConnection extends Connection {
     public FakeConnection() {
         super(PacketFlow.SERVERBOUND);
         // channelActive (fired by registering this handler) sets this.channel.
-        new EmbeddedChannel(this);
+        EmbeddedChannel ch = new EmbeddedChannel(this);
+        // 1.20.2:协议编解码挂在 channel attribute 上,placeNewPlayer →
+        // ServerGamePacketListenerImpl 构造即读取,不种直接 NPE。
+        ch.attr(Connection.ATTRIBUTE_SERVERBOUND_PROTOCOL)
+                .set(net.minecraft.network.ConnectionProtocol.PLAY.codec(PacketFlow.SERVERBOUND));
+        ch.attr(Connection.ATTRIBUTE_CLIENTBOUND_PROTOCOL)
+                .set(net.minecraft.network.ConnectionProtocol.PLAY.codec(PacketFlow.CLIENTBOUND));
     }
 
     /** Discard every outbound packet — there is no client to receive it.
