@@ -30,9 +30,10 @@ public final class NumenForgeClient {
 
     /** Wire every client listener. {@code modBus} is the mod event bus from the constructor. */
     public static void init(IEventBus modBus) {
-        // 读回上次选择的 GUI 主题(config/numen/ui.json)。
+        // 读回上次选择的 GUI 主题(config/numen/ui.json)。路径走 FMLPaths——
+        // datagen 环境没有 Minecraft 实例,Minecraft.getInstance() 会 NPE 炸掉 CI。
         com.dwinovo.numen.client.screen.UiTheme.init(
-                Minecraft.getInstance().gameDirectory.toPath().resolve("config").resolve("numen"));
+                net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get().resolve("numen"));
         // Mod bus — registration events.
         modBus.addListener(NumenForgeClient::registerKeyMappings);
         modBus.addListener(NumenForgeClient::registerGuiOverlays);
