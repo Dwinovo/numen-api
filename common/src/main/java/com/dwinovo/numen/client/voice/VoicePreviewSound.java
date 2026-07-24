@@ -10,7 +10,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 设置界面"试听"用的 2D 就地播放:不挂实体、无距离衰减、位置相对监听者
  * (即耳边直出,vanilla UI 音效的既有做法)。数据同样是内存 PCM,取数与 3D
- * 路径共用一套 loader 分家机制(经 {@code Services.VOICE} 工厂创建:
+ * 路径共用一套 loader 分家机制(经 {@code ClientServices.VOICE} 工厂创建:
  * Forge 返回覆写其 {@code getStream} 补丁钩子的 {@code ForgeVoicePreviewSound},
  * Fabric 返回覆写 Fabric API {@code getAudioStream} 钩子的
  * {@code FabricVoicePreviewSound}),不另起播放机制。详见
