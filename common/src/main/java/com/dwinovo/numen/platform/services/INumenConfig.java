@@ -76,9 +76,10 @@ public interface INumenConfig {
 
     /**
      * Agent observation mode, selected explicitly by the user: {@code structured} keeps the
-     * original tool/text observations and sends no image; {@code hybrid} additionally attaches a
-     * fresh first-person frame; {@code visual} attaches the frame and omits automatic known-block
-     * text. Numen never guesses image capability from the configured model id.
+     * original tool/text observations and sends no image; {@code hybrid} adds a low-cost
+     * first-person orientation frame at each user/event turn; {@code visual} requests a fresh,
+     * high-detail frame on every pulse and omits automatic known-block text only when capture
+     * succeeds. Numen never guesses image capability from the configured model id.
      */
     default String getObservationMode() { return "structured"; }
 

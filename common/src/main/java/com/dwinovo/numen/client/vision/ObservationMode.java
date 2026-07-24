@@ -4,9 +4,9 @@ package com.dwinovo.numen.client.vision;
 public enum ObservationMode {
     /** Original Numen behaviour: text/tool observations only. */
     STRUCTURED,
-    /** Explicitly selected first-person image plus all original structured observations. */
+    /** Structured observations plus a low-cost orientation frame at each user/event turn. */
     HYBRID,
-    /** Force image input; suppress automatically injected known-block text. */
+    /** Fresh high-detail frame on every pulse; hide known-block text only after capture succeeds. */
     VISUAL;
 
     public static ObservationMode parse(String value) {

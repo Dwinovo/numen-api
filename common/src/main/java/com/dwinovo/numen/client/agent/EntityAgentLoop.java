@@ -11,6 +11,7 @@ import com.dwinovo.numen.agent.tool.NumenTool;
 import com.dwinovo.numen.agent.tool.ToolInvocation;
 import com.dwinovo.numen.agent.tool.ToolRegistry;
 import com.dwinovo.numen.client.vision.ObservationMode;
+import com.dwinovo.numen.client.vision.ObservationRequestPolicy;
 import com.dwinovo.numen.client.vision.VisionObservationCapture;
 import com.dwinovo.numen.data.ModLanguageData;
 import com.dwinovo.numen.platform.Services;
@@ -956,9 +957,10 @@ public final class EntityAgentLoop {
         // 核心+人设)因此字节级稳定,支持缓存的服务商整段命中。
         AbstractClientPlayer envBody = resolveEntity();
         String knownBlocks = workBlocks.formatXml(envBody != null ? envBody.level() : null);
-        if (observationMode() != ObservationMode.VISUAL && !knownBlocks.isEmpty()) {
-            parts.add(knownBlocks);
-        }
+        // Keep this structured fallback in the durable conversation for every mode. Pure visual
+        // removes it only from requests that actually obtained an image, so a timed-out capture is
+        // never a blind turn and changing modes does not require rewriting history.
+        if (!knownBlocks.isEmpty()) parts.add(knownBlocks);
         parts.addAll(inbox.drain());
         String merged = String.join("\n", parts);
         convo.addUser(merged);
@@ -1060,22 +1062,26 @@ public final class EntityAgentLoop {
         NumenLlmClient llm = client();
         ObservationMode mode = observationMode();
         java.util.concurrent.CompletableFuture<com.dwinovo.numen.agent.llm.VisualObservation> frame;
-        // Vision is an explicit user choice. Never guess capability from a model id/provider list:
-        // HYBRID and VISUAL attach a frame; STRUCTURED does not.
-        if (!allowVision || mode == ObservationMode.STRUCTURED) {
+        // Vision is an explicit user choice. Pure visual captures every pulse because images are
+        // ephemeral; hybrid captures only the opening user/event pulse and uses structured tool
+        // results for the rest of that chain to avoid repeatedly billing near-identical frames.
+        boolean capture = allowVision && ObservationRequestPolicy.shouldCapture(mode, messages);
+        if (!capture) {
             frame = java.util.concurrent.CompletableFuture.completedFuture(null);
         } else {
-            frame = VisionObservationCapture.request(entityUuid);
+            frame = VisionObservationCapture.request(entityUuid, mode);
         }
 
         frame.whenComplete((observation, captureError) -> Minecraft.getInstance().execute(() -> {
             if (gen != turnGeneration || aborted || dead || externallyDriven) return;
-            if (captureError != null) {
-                Constants.LOG.warn("[numen-entity#{}] visual capture failed; falling back to structured turn: {}",
-                        entityUuid, unwrap(captureError));
+            if (capture && (captureError != null || observation == null || observation.isEmpty())) {
+                Constants.LOG.warn("[numen-entity#{}] visual capture unavailable; using structured fallback{}",
+                        entityUuid, captureError == null ? "" : ": " + unwrap(captureError));
             }
+            List<ConvoState.Msg> requestMessages = ObservationRequestPolicy.messagesForRequest(
+                    mode, observation, messages);
             final VoiceTurn voiceTurn = beginVoiceTurn();
-            llm.chatStreaming(messages, tools, systemPrompt, observation,
+            llm.chatStreaming(requestMessages, tools, systemPrompt, observation,
                             tapForUi(gen, voiceTurn.sink()))
                     .whenComplete((res, err) -> {
                         voiceTurn.finish().run();
@@ -1289,14 +1295,26 @@ public final class EntityAgentLoop {
 
 
                     <visual_observation_rules>
-                    A newest user turn may include one attached <visual_observation>: a clean, fresh
-                    first-person frame rendered from your own body's position and view direction. Use
-                    visible geometry, entities, signs, block faces, and modded interfaces as evidence.
-                    Images are ephemeral and never retained in history. Do not invent occluded details,
-                    exact item counts, IDs, or coordinates from pixels; use the original inspect/scan/status
-                    tools when precision or verification matters. In hybrid mode, combine both modalities:
-                    disagreement means inspect and trust current tool ground truth.
-                    </visual_observation_rules>""");
+                    An attached <visual_observation> is a clean, fresh first-person frame rendered from
+                    your own body's position and view direction. Use visible geometry, entities, signs,
+                    block faces, and modded interfaces as evidence. Images are ephemeral and never retained
+                    in history. Do not invent occluded details, exact item counts, IDs, or coordinates from
+                    pixels; use inspect/scan/status tools when precision or verification matters.
+                    """);
+            if (visionMode == ObservationMode.HYBRID) {
+                sb.append("""
+                    Hybrid mode attaches a low-cost orientation frame at the start of a user/event turn;
+                    later tool-result pulses may be structured-only. Combine both modalities. If they
+                    disagree, inspect and trust current tool ground truth.
+                    """);
+            } else {
+                sb.append("""
+                    Pure visual mode uses the frame as primary ambient evidence and omits injected
+                    known-block coordinates when capture succeeds. If no frame is attached, capture was
+                    unavailable and the retained structured context is the deliberate fallback.
+                    """);
+            }
+            sb.append("</visual_observation_rules>");
         }
         if (!skillsXml.isEmpty()) {
             sb.append("\n\n").append(skillsXml);

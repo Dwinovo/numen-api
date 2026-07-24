@@ -68,7 +68,7 @@
   "numen.respawn": "· reviving %ss",
   "numen.observation.auto_skill": "Learn reusable unknown workflows as new Skills",
   "numen.observation.auto_skill_hint": "Only successful, novel multi-step procedures are saved; existing Skills are never overwritten.",
-  "numen.observation.description": "Explicit opt-in: Numen never infers image support from the model name.",
+  "numen.observation.description": "Hybrid saves image tokens; Visual prioritizes detail. Both require explicit opt-in.",
   "numen.observation.hybrid": "Hybrid",
   "numen.observation.mode": "Observation mode",
   "numen.observation.off": "Off",

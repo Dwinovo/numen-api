@@ -68,7 +68,7 @@
   "numen.respawn": "· 复活中 %ss",
   "numen.observation.auto_skill": "把可复用的未知操作学成新技能",
   "numen.observation.auto_skill_hint": "只保存成功、全新且多步骤的流程；绝不覆盖已有技能。",
-  "numen.observation.description": "视觉须手动开启；Numen 不会根据模型名称猜测图片能力。",
+  "numen.observation.description": "混合模式节省图片 Token，纯视觉优先细节；两者都须手动开启。",
   "numen.observation.hybrid": "混合",
   "numen.observation.mode": "观察模式",
   "numen.observation.off": "关闭",

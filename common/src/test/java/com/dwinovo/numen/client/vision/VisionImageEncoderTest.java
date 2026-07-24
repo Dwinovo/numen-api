@@ -3,11 +3,9 @@ package com.dwinovo.numen.client.vision;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
-import java.awt.Color;
-import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,23 +14,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VisionImageEncoderTest {
 
     @Test
-    void downscalesAndProducesDecodableJpeg() throws Exception {
-        BufferedImage source = new BufferedImage(1600, 1000, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = source.createGraphics();
-        g.setColor(new Color(20, 80, 140));
-        g.fillRect(0, 0, source.getWidth(), source.getHeight());
-        g.dispose();
-        ByteArrayOutputStream png = new ByteArrayOutputStream();
-        ImageIO.write(source, "png", png);
+    void producesDecodableJpegFromRawFramebufferPixels() throws Exception {
+        int width = 800;
+        int height = 500;
+        int[] argb = new int[width * height];
+        Arrays.fill(argb, 0xFF14508C);
+        VisionCaptureProfile profile = new VisionCaptureProfile(800, 600, 0.7F, "low");
 
-        var observation = VisionImageEncoder.encode(png.toByteArray(), 800, 600, 0.7F);
+        var observation = VisionImageEncoder.encode(argb, width, height, profile);
         assertEquals("image/jpeg", observation.mimeType());
-        assertEquals(800, observation.width());
-        assertEquals(500, observation.height());
+        assertEquals(width, observation.width());
+        assertEquals(height, observation.height());
+        assertEquals("low", observation.detail());
         byte[] jpeg = Base64.getDecoder().decode(observation.base64());
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(jpeg));
-        assertEquals(800, decoded.getWidth());
-        assertEquals(500, decoded.getHeight());
-        assertTrue(jpeg.length < png.size());
+        assertEquals(width, decoded.getWidth());
+        assertEquals(height, decoded.getHeight());
+        assertTrue(jpeg.length < argb.length * Integer.BYTES);
     }
 }

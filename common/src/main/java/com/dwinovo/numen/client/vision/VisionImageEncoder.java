@@ -7,54 +7,31 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.Iterator;
 
-/** Downsamples a raw Minecraft framebuffer PNG into a token/bandwidth-conscious JPEG. */
+/** Encodes an already sampled Minecraft framebuffer into a bandwidth-conscious JPEG. */
 public final class VisionImageEncoder {
-
-    /** 1280×720 retains block/UI detail while avoiding multi-megabyte request bodies. */
-    static final int DEFAULT_MAX_WIDTH = 1280;
-    static final int DEFAULT_MAX_HEIGHT = 720;
-    static final float DEFAULT_JPEG_QUALITY = 0.78F;
 
     private VisionImageEncoder() {}
 
-    public static VisualObservation encode(byte[] png) throws IOException {
-        return encode(png, DEFAULT_MAX_WIDTH, DEFAULT_MAX_HEIGHT, DEFAULT_JPEG_QUALITY);
-    }
-
-    static VisualObservation encode(byte[] png, int maxWidth, int maxHeight, float quality)
-            throws IOException {
-        if (png == null || png.length == 0) throw new IOException("empty framebuffer image");
-        BufferedImage source = ImageIO.read(new ByteArrayInputStream(png));
-        if (source == null) throw new IOException("framebuffer PNG could not be decoded");
-
-        double scale = Math.min(1.0D, Math.min(
-                Math.max(1, maxWidth) / (double) source.getWidth(),
-                Math.max(1, maxHeight) / (double) source.getHeight()));
-        int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
-        int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
-
-        // JPEG has no alpha. Drawing onto TYPE_INT_RGB also avoids provider-specific failures on
-        // four-channel JPEG encoders and gives deterministic black-free world frames.
-        BufferedImage rgb = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = rgb.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    scale < 1.0D ? RenderingHints.VALUE_INTERPOLATION_BILINEAR
-                            : RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            g.drawImage(source, 0, 0, width, height, null);
-        } finally {
-            g.dispose();
+    /**
+     * Encode ARGB pixels copied from a bounded {@code NativeImage}. The framebuffer is sampled to
+     * its target dimensions before this asynchronous stage, avoiding the former render-thread PNG
+     * compression followed by an ImageIO PNG decode.
+     */
+    public static VisualObservation encode(int[] argb, int width, int height,
+                                           VisionCaptureProfile profile) throws IOException {
+        if (width < 1 || height < 1 || argb == null || argb.length != width * height) {
+            throw new IOException("invalid framebuffer pixels");
         }
+        VisionCaptureProfile safeProfile = profile == null
+                ? VisionCaptureProfile.forMode(ObservationMode.HYBRID) : profile;
+        BufferedImage rgb = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        rgb.setRGB(0, 0, width, height, argb, 0, width);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(16_384, width * height / 4));
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
@@ -65,7 +42,7 @@ public final class VisionImageEncoder {
             ImageWriteParam params = writer.getDefaultWriteParam();
             if (params.canWriteCompressed()) {
                 params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-                params.setCompressionQuality(Math.max(0.1F, Math.min(1.0F, quality)));
+                params.setCompressionQuality(safeProfile.jpegQuality());
             }
             writer.write(null, new IIOImage(rgb, null, null), params);
         } finally {
@@ -73,6 +50,7 @@ public final class VisionImageEncoder {
         }
 
         return new VisualObservation("image/jpeg",
-                Base64.getEncoder().encodeToString(out.toByteArray()), width, height, "high");
+                Base64.getEncoder().encodeToString(out.toByteArray()), width, height,
+                safeProfile.detail());
     }
 }
