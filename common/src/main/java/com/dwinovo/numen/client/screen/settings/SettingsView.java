@@ -627,7 +627,7 @@ public final class SettingsView {
         savedFlashUntil = System.currentTimeMillis() + 1500;
     }
 
-    private void renderBrainSection(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderBrainSection(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int x = secX(), w = secW(), fy = secY0();
         McpMode mcp = McpMode.instance();
         boolean on = mcp.enabled();

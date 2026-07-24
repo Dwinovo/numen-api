@@ -186,7 +186,7 @@ public final class ChatView {
      * <p>数据来自 {@link McpMode.ActivityFeed} 的只读快照(HTTP 线程写、这里读),
      * 纯内存不持久化;还没人接入时这里改显示接入向导。
      */
-    public void renderConsole(GuiGraphics g, int x, int y, int w, int h) {
+    public void renderConsole(GuiGraphicsExtractor g, int x, int y, int w, int h) {
         loadPalette();
         McpMode mcp = McpMode.instance();
         int cx = x + EDGE;
@@ -223,7 +223,7 @@ public final class ChatView {
     }
 
     /** 还没有调用记录时的引导:连上了就等它动手,没连过就讲怎么接。 */
-    private void renderConsoleGuide(GuiGraphics g, McpMode mcp, int cx, int cy, int cw, boolean connected) {
+    private void renderConsoleGuide(GuiGraphicsExtractor g, McpMode mcp, int cx, int cy, int cw, boolean connected) {
         if (connected) {
             line(g, I18n.get("numen.brain.console_empty"), cx, cy, FAINT);
             return;
@@ -240,7 +240,7 @@ public final class ChatView {
         }
     }
 
-    private void line(GuiGraphics g, String text, int x, int y, int color) {
+    private void line(GuiGraphicsExtractor g, String text, int x, int y, int color) {
         draw(g, Nb.colored(text, color).getVisualOrderText(), x, y);
     }
 
