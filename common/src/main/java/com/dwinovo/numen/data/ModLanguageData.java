@@ -41,8 +41,9 @@ public final class ModLanguageData {
         public static final String GUI_SETTINGS_CANCEL      = "numen.gui.settings.cancel";
         public static final String GUI_SETTINGS_SAVED       = "numen.gui.settings.saved";
 
-        /** Hotkey: open the companion roster panel (shown in Controls settings). */
-        public static final String KEY_OPEN_ROSTER = "key.numen.open_roster";
+        /** Dedicated Minecraft Controls category and the roster-panel hotkey. */
+        public static final String KEY_CATEGORY_NUMEN = "key.categories.numen";
+        public static final String KEY_OPEN_ROSTER    = "key.numen.open_roster";
 
         // Model-config (provider library) section: nav label, list, form.
         public static final String PROVIDER_TITLE          = "numen.provider.title";
@@ -162,6 +163,7 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_CANCEL,        "Cancel");
         adder.add(Keys.GUI_SETTINGS_SAVED,         "Saved");
 
+        adder.add(Keys.KEY_CATEGORY_NUMEN, "Numen");
         adder.add(Keys.KEY_OPEN_ROSTER, "Open Companion Roster");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---
@@ -378,6 +380,7 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_CANCEL,        "取消");
         adder.add(Keys.GUI_SETTINGS_SAVED,         "已保存");
 
+        adder.add(Keys.KEY_CATEGORY_NUMEN, "Numen");
         adder.add(Keys.KEY_OPEN_ROSTER, "打开同伴名册");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---

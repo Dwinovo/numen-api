@@ -61,7 +61,7 @@ public class NumenNeoForgeClient {
     }
 
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
-        // G → companion roster panel (chat entry + settings/reset live in there).
+        // Companion roster key (G by default; Minecraft Controls owns rebinding/persistence).
         event.register(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
     }
 

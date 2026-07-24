@@ -1,4 +1,5 @@
 {
+  "key.categories.numen": "Numen",
   "key.numen.open_roster": "Open Companion Roster",
   "numen.chat.compacted": "─── earlier conversation compacted to a summary (originals kept on disk) ───",
   "numen.chat.compacting": "compacting history…",

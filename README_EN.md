@@ -32,6 +32,7 @@ What the engine provides:
 - **Conversation memory** — persists across saves and auto-compacts (Claude-Code-style) when it grows long.
 - **A companion body** — `NumenPlayer`, a server-side fake player (`ServerPlayer`). Every action runs through native player code paths, so redstone, mob AI, containers, and other mods treat it as a real player.
 - **A skill system** — plain-text Markdown workflows that teach the companion how to play, loaded only when relevant.
+- **Native key binding** — the companion panel defaults to `G` and can be rebound or unbound under Minecraft Options → Controls → Key Binds → Numen.
 - **Multi-loader** — one codebase across `common` / `fabric` / `forge` / `neoforge`.
 
 ---

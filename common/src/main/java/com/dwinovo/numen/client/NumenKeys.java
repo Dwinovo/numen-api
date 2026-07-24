@@ -13,11 +13,18 @@ import org.lwjgl.glfw.GLFW;
  */
 public final class NumenKeys {
 
-    /** G — open the companion roster panel (or straight into chat with a single pet). */
+    /** Dedicated vanilla Controls category so the binding is easy to discover and rebind. */
+    public static final String CATEGORY =
+            com.dwinovo.numen.data.ModLanguageData.Keys.KEY_CATEGORY_NUMEN;
+
+    /**
+     * Open the companion roster panel (or straight into chat with a single pet).
+     * G is only the default: Minecraft owns persistence and rebinding through
+     * Options → Controls → Key Binds → Numen.
+     */
     public static final KeyMapping OPEN_ROSTER = new KeyMapping(
             com.dwinovo.numen.data.ModLanguageData.Keys.KEY_OPEN_ROSTER,
-            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G,
-            "key.categories.misc");
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, CATEGORY);
 
     private NumenKeys() {}
 

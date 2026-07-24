@@ -68,7 +68,7 @@ public class NumenFabricClient implements ClientModInitializer {
                     }
                 });
 
-        // G → companion roster panel (chat entry + settings/reset live in there).
+        // Companion roster key (G by default; Minecraft Controls owns rebinding/persistence).
         KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
                 .register(client -> {

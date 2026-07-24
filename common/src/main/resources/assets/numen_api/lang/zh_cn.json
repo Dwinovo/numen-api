@@ -1,4 +1,5 @@
 {
+  "key.categories.numen": "Numen",
   "key.numen.open_roster": "打开同伴名册",
   "numen.chat.compacted": "─── 更早的对话已压缩为摘要（原文保留在磁盘） ───",
   "numen.chat.compacting": "正在压缩历史…",
