@@ -4,7 +4,7 @@ import com.dwinovo.numen.agent.skill.SkillRegistry;
 import com.dwinovo.numen.mcp.client.McpClientManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
 import net.minecraft.client.Minecraft;
@@ -58,7 +58,7 @@ public class NumenFabricClient implements ClientModInitializer {
         // shader 配置,fabric 侧无需(也已无)注册 API——RoundRect 按键查表即可。
 
         // N → companion roster panel (chat entry + settings/reset live in there).
-        KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        KeyMappingHelper.registerKeyMapping(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
                 .register(client -> {
                     com.dwinovo.numen.client.NumenKeys.tick();
@@ -67,8 +67,9 @@ public class NumenFabricClient implements ClientModInitializer {
                 });
 
         // HUD: advancement-style activity toasts (top-right) when not watching a panel.
-        // 1.21.5 predates the HudElementRegistry layer API; use the classic HudRenderCallback.
-        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+        // 26.1 fabric-api replaced HudRenderCallback with the HudElementRegistry layer API.
+        net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry.addLast(
+                net.minecraft.resources.Identifier.fromNamespaceAndPath(Constants.MOD_ID, "toasts"),
                 (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
 
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT
@@ -80,14 +81,14 @@ public class NumenFabricClient implements ClientModInitializer {
                     com.dwinovo.numen.client.debug.PathDebugState.clear();
                 });
 
-        // 寻路调试覆盖层:世界空间画线。1.21.10 fabric-api 把事件挪进 rendering.v1.world
-        // 包并撤掉了 AFTER_TRANSLUCENT/ctx.camera():挂 BEFORE_DEBUG_RENDER(原版调试线
-        // 的绘制点,语义一致),相机改走 gameRenderer.getMainCamera()。
-        net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents.BEFORE_DEBUG_RENDER
+        // 寻路调试覆盖层:世界空间画线。26.1 fabric-api 迁 rendering.v1.level 的
+        // LevelRenderEvents:挂 BEFORE_GIZMOS(原版调试图元 gizmo 的绘制点,语义一致),
+        // 相机仍走 gameRenderer.getMainCamera()。
+        net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.BEFORE_GIZMOS
                 .register(context -> {
-                    if (context.matrices() != null) {
+                    if (context.poseStack() != null) {
                         com.dwinovo.numen.client.debug.PathDebugRenderer.render(
-                                context.matrices(),
+                                context.poseStack(),
                                 Minecraft.getInstance().gameRenderer.getMainCamera());
                     }
                 });
