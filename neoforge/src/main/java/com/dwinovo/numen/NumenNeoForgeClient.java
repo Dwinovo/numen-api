@@ -57,7 +57,7 @@ public class NumenNeoForgeClient {
     }
 
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
-        // G → companion roster panel (chat entry + settings/reset live in there).
+        // N → companion roster panel (chat entry + settings/reset live in there).
         event.register(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
     }
 

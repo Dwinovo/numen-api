@@ -57,7 +57,7 @@ public class NumenFabricClient implements ClientModInitializer {
         // GUI 圆角 SDF shader:1.21.4 的 ShaderManager 自动扫描编译资源树里的全部
         // shader 配置,fabric 侧无需(也已无)注册 API——RoundRect 按键查表即可。
 
-        // G → companion roster panel (chat entry + settings/reset live in there).
+        // N → companion roster panel (chat entry + settings/reset live in there).
         KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
                 .register(client -> {
