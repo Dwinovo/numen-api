@@ -29,9 +29,12 @@ What the engine provides:
 - **A client-side agent loop** (`EntityAgentLoop`) — hears a message, picks a tool, runs it, reads the result, decides the next move. The brain runs on the owner's own game client with the owner's own API key.
 - **A tool contract** — `NumenTool` / `ToolRegistry` / `ToolCall` / `TaskResult`. A tool is any capability the companion can call; the engine schedules it and routes the result back into the conversation.
 - **OpenAI-compatible LLM providers** — DeepSeek, DashScope (Qwen), OpenAI, Moonshot (Kimi), Zhipu (GLM), Minimax, SiliconFlow, Volcengine (Doubao). Transport is hand-rolled on the JDK's `HttpClient` + Gson, so there are **zero third-party runtime dependencies**.
+- **Optional multimodal visual observation** — structured observation remains the default. A clean first-person frame is sent only after the player explicitly selects hybrid or visual mode; each frame is an ephemeral 1280×720 JPEG and is never persisted in history.
 - **Conversation memory** — persists across saves and auto-compacts (Claude-Code-style) when it grows long.
+- **Automatic Skill learning** — after a novel unskilled multi-step workflow succeeds, one extra text-only background model call distills grounded tool feedback into `config/numen/skills/<name>/SKILL.md` without ever overwriting an existing Skill; it can be disabled in settings.
 - **A companion body** — `NumenPlayer`, a server-side fake player (`ServerPlayer`). Every action runs through native player code paths, so redstone, mob AI, containers, and other mods treat it as a real player.
 - **A skill system** — plain-text Markdown workflows that teach the companion how to play, loaded only when relevant.
+- **Vision & learning settings** — Settings → Vision selects `structured / hybrid / visual` and can disable automatic Skill learning. Numen keeps no vision-model allowlist and never guesses from model ids: sending images is entirely the player's choice. Hybrid may retry without a frame; visual mode preserves the explicit requirement and exposes an incompatible endpoint's error.
 - **Multi-loader** — one codebase across `common` / `fabric` / `forge` / `neoforge`.
 
 ---

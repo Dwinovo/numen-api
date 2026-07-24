@@ -10,8 +10,10 @@ import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -249,6 +251,49 @@ public final class SkillRegistry {
 
     public int size() {
         return skills.size();
+    }
+
+    /**
+     * Validate and install an automatically generated SKILL.md into the player's skill root.
+     * Existing skills are never overwritten (including bundled skills overridden by name). The
+     * write uses a same-directory temporary file + atomic move where supported, so a crash cannot
+     * leave a half-written workflow that the next scan would ingest.
+     *
+     * @return the newly loaded skill, or empty for SKIP/malformed/conflicting/unavailable output
+     */
+    public Optional<SkillInfo> installGenerated(String modelOutput) {
+        Optional<AutoSkillDraft.Draft> parsed = AutoSkillDraft.parse(modelOutput);
+        if (parsed.isEmpty() || userRoot == null) return Optional.empty();
+        AutoSkillDraft.Draft draft = parsed.get();
+        if (skills.containsKey(draft.name())) {
+            Constants.LOG.info("[numen-skill] auto-learn skipped: '{}' already exists", draft.name());
+            return Optional.empty();
+        }
+
+        Path root = userRoot.toAbsolutePath().normalize();
+        Path dir = root.resolve(draft.name()).normalize();
+        if (!dir.startsWith(root)) return Optional.empty(); // defense in depth beyond slug normalization
+        Path target = dir.resolve(SKILL_FILENAME);
+        try {
+            Files.createDirectories(dir);
+            if (Files.exists(target)) return Optional.empty();
+            Path temp = Files.createTempFile(dir, ".SKILL.", ".tmp");
+            Files.writeString(temp, draft.markdown(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(temp, target);
+            }
+            rescan();
+            Optional<SkillInfo> installed = get(draft.name());
+            installed.ifPresent(info -> Constants.LOG.info(
+                    "[numen-skill] auto-learned '{}' at {}", info.name(), info.location()));
+            return installed;
+        } catch (IOException | RuntimeException ex) {
+            Constants.LOG.warn("[numen-skill] couldn't install generated '{}': {}",
+                    draft.name(), ex.toString());
+            return Optional.empty();
+        }
     }
 
     // ---- enable/disable (panel-facing; all on the client main thread) ----

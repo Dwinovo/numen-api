@@ -160,14 +160,36 @@ public final class NumenLlmClient {
                                                        Collection<NumenTool> tools,
                                                        String systemPrompt,
                                                        Consumer<JsonObject> onChunk) {
+        return chatStreaming(messages, tools, systemPrompt, null, onChunk);
+    }
+
+    /**
+     * Multimodal streaming completion. {@code observation} is request-local: it is attached only to
+     * the newest user turn (or appended as a tiny ephemeral user turn after tool results) and never
+     * enters {@link ConvoState}. This keeps image tokens and base64 blobs out of future history.
+     */
+    public CompletableFuture<ChatResult> chatStreaming(List<ConvoState.Msg> messages,
+                                                       Collection<NumenTool> tools,
+                                                       String systemPrompt,
+                                                       VisualObservation observation,
+                                                       Consumer<JsonObject> onChunk) {
         // -- 1. Build wire-format messages and tool list via provider.
-        List<JsonObject> wire = new ArrayList<>(messages.size());
-        for (ConvoState.Msg m : messages) {
+        boolean hasVision = observation != null && !observation.isEmpty();
+        boolean attachToLast = hasVision && !messages.isEmpty()
+                && messages.get(messages.size() - 1) instanceof ConvoState.Msg.User;
+        List<JsonObject> wire = new ArrayList<>(messages.size() + (hasVision && !attachToLast ? 1 : 0));
+        for (int i = 0; i < messages.size(); i++) {
+            ConvoState.Msg m = messages.get(i);
             switch (m) {
-                case ConvoState.Msg.User u -> wire.add(provider.buildUserMessage(u.content()));
+                case ConvoState.Msg.User u -> wire.add(attachToLast && i == messages.size() - 1
+                        ? provider.buildVisionUserMessage(visionText(u.content(), observation), observation)
+                        : provider.buildUserMessage(u.content()));
                 case ConvoState.Msg.Assistant a -> wire.add(provider.assistantToRequestMessage(a.turn()));
                 case ConvoState.Msg.Tool t -> wire.add(provider.buildToolResultMessage(t.toolCallId(), t.content()));
             }
+        }
+        if (hasVision && !attachToLast) {
+            wire.add(provider.buildVisionUserMessage(visionText("", observation), observation));
         }
         JsonArray toolList = provider.buildToolList(tools);
         JsonObject body = provider.buildRequestBody(model, systemPrompt, wire, toolList);
@@ -185,8 +207,9 @@ public final class NumenLlmClient {
         body.add("stream_options", streamOpts);
 
         if (Constants.LOG.isDebugEnabled()) {
-            Constants.LOG.debug("[numen-llm] chat start: provider={}, model={}, msgs={}, tools={}, system_prompt_chars={}",
-                    provider.name(), model, wire.size(), toolList.size(),
+            Constants.LOG.debug("[numen-llm] chat start: provider={}, model={}, msgs={}, tools={}, vision={} ({}x{}), system_prompt_chars={}",
+                    provider.name(), model, wire.size(), toolList.size(), hasVision,
+                    hasVision ? observation.width() : 0, hasVision ? observation.height() : 0,
                     systemPrompt == null ? 0 : systemPrompt.length());
         }
 
@@ -231,6 +254,13 @@ public final class NumenLlmClient {
                 elapsedMs, acc.chunkCount, tokens,
                 acc.finishReason == null ? "?" : acc.finishReason,
                 toolSummary, contentSnippet);
+    }
+
+    private static String visionText(String content, VisualObservation observation) {
+        String marker = "<visual_observation source=\"numen_first_person\" width=\""
+                + observation.width() + "\" height=\"" + observation.height()
+                + "\">A fresh first-person frame from your body is attached.</visual_observation>";
+        return content == null || content.isBlank() ? marker : content + "\n" + marker;
     }
 
     private static boolean nonBlank(String s) { return s != null && !s.isBlank(); }

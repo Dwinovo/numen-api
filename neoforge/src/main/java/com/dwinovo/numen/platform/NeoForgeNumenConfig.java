@@ -28,6 +28,8 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     public static final ModConfigSpec.ConfigValue<String> PROXY;
     public static final ModConfigSpec.ConfigValue<String> REASONING_EFFORT;
     public static final ModConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
+    public static final ModConfigSpec.ConfigValue<String> OBSERVATION_MODE;
+    public static final ModConfigSpec.BooleanValue AUTO_SKILL_LEARNING;
     public static final ModConfigSpec.ConfigValue<String> STT_PROVIDER;
     public static final ModConfigSpec.ConfigValue<String> STT_API_KEY;
     public static final ModConfigSpec.ConfigValue<String> STT_BASE_URL;
@@ -77,6 +79,15 @@ public final class NeoForgeNumenConfig implements INumenConfig {
                 .define("system_prompt",
                         "You are Numen, a Minecraft entity controlled by the player who owns you.\n"
                                 + "Use the tools provided to act in the world; output text only to talk to your owner.");
+        OBSERVATION_MODE = b.comment(
+                "Explicit observation mode: structured | hybrid | visual.",
+                "structured (default) sends no image; hybrid attaches a first-person frame and retains structured observations.",
+                "visual attaches the frame and omits automatic known-block text.",
+                "Numen never infers image capability from a model name; choose hybrid/visual only for a compatible endpoint.")
+                .define("observation_mode", "structured");
+        AUTO_SKILL_LEARNING = b.comment(
+                "Automatically summarize novel reusable successful workflows into config/numen/skills.")
+                .define("auto_skill_learning", true);
         b.pop();
 
         b.comment("Voice input (STT) — global, one microphone / one transcription service.").push("stt");
@@ -134,6 +145,17 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     public String getReasoningEffort() {
         String s = safe(REASONING_EFFORT);
         return s.isEmpty() ? "auto" : s;
+    }
+
+    @Override
+    public String getObservationMode() {
+        String s = safe(OBSERVATION_MODE);
+        return s.isEmpty() ? "structured" : s;
+    }
+
+    @Override
+    public boolean isAutoSkillLearningEnabled() {
+        try { return AUTO_SKILL_LEARNING.get(); } catch (IllegalStateException ex) { return true; }
     }
 
     @Override
@@ -197,6 +219,16 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     @Override
     public void setSystemPrompt(String value) {
         SYSTEM_PROMPT.set(value == null ? "" : value);
+    }
+
+    @Override
+    public void setObservationMode(String value) {
+        OBSERVATION_MODE.set(value == null ? "structured" : value);
+    }
+
+    @Override
+    public void setAutoSkillLearningEnabled(boolean value) {
+        AUTO_SKILL_LEARNING.set(value);
     }
 
     @Override
