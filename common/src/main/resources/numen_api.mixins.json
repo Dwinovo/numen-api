@@ -8,7 +8,9 @@
     "MixinServerCommonPacketListener"
   ],
   "client": [
-    "MixinMinecraft"
+    "KeyMappingAccessor",
+    "MixinMinecraft",
+    "OptionsAccessor"
   ],
   "server": [],
   "injectors": {

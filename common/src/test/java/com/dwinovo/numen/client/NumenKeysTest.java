@@ -7,6 +7,8 @@ import org.lwjgl.glfw.GLFW;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NumenKeysTest {
@@ -28,5 +30,26 @@ class NumenKeysTest {
             KeyMapping.resetMapping();
         }
         assertTrue(mapping.isDefault());
+    }
+
+    @Test
+    void optionsFallbackAppendsExactlyOnce() {
+        KeyMapping other = new KeyMapping("key.test.other", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_H, KeyMapping.CATEGORY_MISC);
+        KeyMapping[] original = {other};
+        KeyMapping[] appended = NumenKeys.ensurePresent(original);
+
+        assertEquals(2, appended.length);
+        assertSame(NumenKeys.OPEN_ROSTER, appended[1]);
+        assertSame(appended, NumenKeys.ensurePresent(appended));
+    }
+
+    @Test
+    void fallbackReadsVanillaAndNeoForgeSavedBindings() {
+        assertEquals("key.keyboard.n", NumenKeys.savedKeyName(java.util.List.of(
+                "version:3955", "key_key.numen.open_roster:key.keyboard.n")));
+        assertEquals("key.keyboard.p", NumenKeys.savedKeyName(java.util.List.of(
+                "key_key.numen.open_roster:key.keyboard.p:NONE")));
+        assertNull(NumenKeys.savedKeyName(java.util.List.of("key_key.jump:key.keyboard.space")));
     }
 }

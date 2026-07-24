@@ -13,7 +13,9 @@ public class MixinMinecraft {
     @Inject(at = @At("TAIL"), method = "<init>")
     private void init(CallbackInfo info) {
 
+        Minecraft minecraft = (Minecraft) (Object) this;
+        com.dwinovo.numen.client.NumenKeys.ensureRegisteredInOptions(minecraft);
         Constants.LOG.info("This line is printed by an Numen common mixin!");
-        Constants.LOG.info("MC Version: {}", Minecraft.getInstance().getVersionType());
+        Constants.LOG.info("MC Version: {}", minecraft.getVersionType());
     }
 }
