@@ -52,8 +52,10 @@ public class NumenNeoForgeClient {
 
     static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent.AfterTranslucentBlocks event) {
         // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后;1.21.8 起按 stage 子事件分发)。
+        // 21.10 的 stage 事件撤掉了 getCamera(),相机改走 gameRenderer 主相机。
         com.dwinovo.numen.client.debug.PathDebugRenderer.render(
-                event.getPoseStack(), event.getCamera());
+                event.getPoseStack(),
+                net.minecraft.client.Minecraft.getInstance().gameRenderer.getMainCamera());
     }
 
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
