@@ -7,6 +7,7 @@ import com.dwinovo.numen.agent.llm.ConvoState;
 import com.dwinovo.numen.agent.provider.AssistantTurn;
 import com.dwinovo.numen.agent.provider.LlmToolCall;
 import com.dwinovo.numen.agent.skill.SkillRegistry;
+import com.dwinovo.numen.agent.tool.ToolContextPruner;
 import com.dwinovo.numen.agent.tool.ToolDisclosureSession;
 import com.dwinovo.numen.agent.tool.ToolInvocation;
 import com.dwinovo.numen.data.ModLanguageData;
@@ -198,6 +199,8 @@ public final class EntityAgentLoop {
     private long totalTokensUsed = 0;
     /** Consecutive compaction failures — circuit breaker for the auto path. */
     private int compactFailures = 0;
+    /** Suppress duplicate diagnostics while the same deterministic prune set remains active. */
+    private int lastReportedPrunedToolCalls = 0;
 
     /**
      * Set while the body is DEAD and awaiting its timed respawn (see {@link #onEntityDied} /
@@ -941,6 +944,11 @@ public final class EntityAgentLoop {
             return;
         }
 
+        // Automatic tool pruning is request-local: persistence and the visible transcript keep the
+        // complete trajectory, while already-consumed call/result payloads stop occupying model
+        // context. Use that effective snapshot for both estimation and the actual request.
+        var snapshot = modelContextSnapshot();
+
         // Auto-compaction gate: the last request's true context size (as the
         // API counted it) is within the buffer of the window — summarize FIRST,
         // then this method re-runs and dispatches the turn on the compacted
@@ -950,7 +958,7 @@ public final class EntityAgentLoop {
         int window = modelWindow();
         int contextTokens = lastPromptTokens > 0
                 ? lastPromptTokens
-                : estimateContextTokens(convo.snapshot());
+                : estimateContextTokens(snapshot);
         if (contextTokens >= window - AUTO_COMPACT_BUFFER_TOKENS
                 && convo.snapshot().size() >= MIN_COMPACT_MESSAGES
                 && compactFailures < MAX_COMPACT_FAILURES) {
@@ -966,7 +974,6 @@ public final class EntityAgentLoop {
 
         toolDisclosure.beginTurn();
         var tools = toolDisclosure.toolsForRequest();
-        var snapshot = convo.snapshot();
         String systemPrompt = composeSystemPrompt();
 
         Constants.LOG.info("[numen-entity#{}] turn {}: convo={} msgs, tools={}",
@@ -1158,6 +1165,19 @@ public final class EntityAgentLoop {
         return raw.replaceFirst("(?s)<analysis>.*?(</analysis>|$)", "").strip();
     }
 
+    /** Effective request history; the source conversation and append-only log remain untouched. */
+    private List<ConvoState.Msg> modelContextSnapshot() {
+        ToolContextPruner.Result result = ToolContextPruner.prune(convo.snapshot());
+        int prunedCalls = result.prunedToolCallIds().size();
+        if (prunedCalls > 0 && prunedCalls != lastReportedPrunedToolCalls) {
+            Constants.LOG.info(
+                    "[numen-entity#{}] auto-pruned {} consumed tool transaction(s), {} result(s), ~{} chars from request context",
+                    entityUuid, prunedCalls, result.removedToolResults(), result.removedPayloadChars());
+        }
+        lastReportedPrunedToolCalls = prunedCalls;
+        return result.messages();
+    }
+
     private String composeSystemPrompt() {
         // Per-companion persona wins; fall back to the global default; with neither,
         // the persona slot says so EXPLICITLY — an unconfigured persona is a valid
@@ -1255,7 +1275,7 @@ public final class EntityAgentLoop {
                 final int gen2 = turnGeneration;
                 final VoiceTurn vt2 = beginVoiceTurn();   // 重跑也重新开口(失败那次的半截语音随 beginTurn 作废)
                 livePartial.setLength(0);                 // 失败那次的半截文字同理作废
-                client().chatStreaming(convo.snapshot(), toolDisclosure.toolsForRequest(),
+                client().chatStreaming(modelContextSnapshot(), toolDisclosure.toolsForRequest(),
                                 composeSystemPrompt(), tapForUi(gen2, vt2.sink()))
                         .whenComplete((r2, e2) -> {
                             vt2.finish().run();
