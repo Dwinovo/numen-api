@@ -18,9 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * external server. On init it reads {@code config/numen/mcp_clients.json},
  * connects to every enabled server on a background thread, and registers the
  * tools it exposes into the global {@link ToolRegistry} — after which the
- * built-in brain sees those tools automatically ({@code EntityAgentLoop} feeds
- * {@code ToolRegistry.all()} to every LLM turn, so late registration/removal is
- * fine).
+ * built-in brain sees their metadata automatically. Full MCP schemas enter a
+ * companion's request only after its progressive-disclosure session selects
+ * them, and late registration/removal is reflected on the next turn.
  *
  * <h2>Live toggles</h2>
  * The companion panel calls {@link #enableServer}/{@link #disableServer} at

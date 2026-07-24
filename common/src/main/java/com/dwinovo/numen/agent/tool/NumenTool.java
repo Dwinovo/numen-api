@@ -29,6 +29,28 @@ public interface NumenTool {
      */
     String description();
 
+    /**
+     * Layer-one metadata used by progressive tool disclosure. Implementations may
+     * override this with a purpose-written one-line summary; the default derives
+     * a bounded first sentence from {@link #description()} so existing and MCP
+     * tools remain source/binary compatible.
+     */
+    default String summary() {
+        String value = description();
+        if (value == null || value.isBlank()) return "";
+        value = value.strip().replaceAll("\\s+", " ");
+        int sentence = -1;
+        for (String end : new String[]{". ", "。", "! ", "? "}) {
+            int i = value.indexOf(end);
+            if (i >= 0 && (sentence < 0 || i < sentence)) sentence = i + 1;
+        }
+        if (sentence > 0) value = value.substring(0, sentence);
+        if (value.length() <= 180) return value;
+        int cut = value.lastIndexOf(' ', 177);
+        if (cut < 80) cut = 177;
+        return value.substring(0, cut).stripTrailing() + "...";
+    }
+
     /** JSON Schema (OpenAI tool-parameter dialect) for the tool's arguments. */
     Map<String, Object> parameterSchema();
 

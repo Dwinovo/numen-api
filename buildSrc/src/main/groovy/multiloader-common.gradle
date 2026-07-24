@@ -125,6 +125,7 @@ tasks.register('apiJar', Jar) {
     // drop the @Internal stragglers sitting inside those API packages
     exclude 'com/dwinovo/numen/agent/tool/ToolInvocation*.class'
     exclude 'com/dwinovo/numen/agent/tool/ClientToolContext*.class'
+    exclude 'com/dwinovo/numen/agent/tool/ToolDisclosureSession*.class'
     exclude 'com/dwinovo/numen/task/TaskQueue*.class'
     exclude 'com/dwinovo/numen/task/CompanionTickDispatcher*.class'
     exclude 'com/dwinovo/numen/task/UnsupportedCompanionTask*.class'

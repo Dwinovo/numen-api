@@ -7,8 +7,8 @@ import com.dwinovo.numen.agent.llm.ConvoState;
 import com.dwinovo.numen.agent.provider.AssistantTurn;
 import com.dwinovo.numen.agent.provider.LlmToolCall;
 import com.dwinovo.numen.agent.skill.SkillRegistry;
+import com.dwinovo.numen.agent.tool.ToolDisclosureSession;
 import com.dwinovo.numen.agent.tool.ToolInvocation;
-import com.dwinovo.numen.agent.tool.ToolRegistry;
 import com.dwinovo.numen.data.ModLanguageData;
 import com.dwinovo.numen.platform.Services;
 import com.dwinovo.numen.platform.services.INumenConfig;
@@ -59,10 +59,10 @@ public final class EntityAgentLoop {
 
     /**
      * Persona prompt for a single Numen body. Deliberately does NOT enumerate
-     * tools — the live tool list (with full descriptions) rides along on every
-     * request, and a prose copy here rotted badly once already. This prompt
-     * carries only what the tool schemas can't: identity, working discipline,
-     * and the voice toward the owner.
+     * tools — layer-one metadata is generated live by {@link ToolDisclosureSession},
+     * while only the small active set carries full schemas on each request. This
+     * prompt carries only what schemas cannot: identity, working discipline, and
+     * the voice toward the owner.
      */
     private static final String ENTITY_PROMPT = com.dwinovo.numen.agent.prompt.NumenPrompts.ENTITY_PROMPT;
 
@@ -178,6 +178,8 @@ public final class EntityAgentLoop {
      * timeout) lives in here, not in the loop.
      */
     private final ToolDispatcher dispatcher;
+    /** Per-companion layer-one catalogue and bounded request-local schema set. */
+    private final ToolDisclosureSession toolDisclosure;
 
     /**
      * 本同伴的流式语音管线,懒创建：首次在声线库里 resolve 到这个 UUID 的
@@ -241,6 +243,7 @@ public final class EntityAgentLoop {
         this.workBlocks = WorkBlockMemory.forEntity(numenRoot.resolve("memory"), entityUuid);
         this.inbox = new Inbox(numenRoot.resolve("conversations"), entityUuid);
         this.providerEntryId = com.dwinovo.numen.agent.llm.ProviderLibrary.instance().assignedEntry(entityUuid);
+        this.toolDisclosure = new ToolDisclosureSession();
         this.dispatcher = new ToolDispatcher(entityUuid, new ToolDispatcher.Sink() {
             @Override public void onResult(ToolInvocation inv, String resultJson) {
                 harvestWorkBlocks(inv.name(), resultJson);
@@ -253,7 +256,7 @@ public final class EntityAgentLoop {
             @Override public AbstractClientPlayer entity() {
                 return resolveEntity();
             }
-        });
+        }, toolDisclosure::resolveForExecution);
         restoreFromDisk();
     }
 
@@ -863,6 +866,7 @@ public final class EntityAgentLoop {
      */
     private void drainInbox() {
         if (inbox.isEmpty()) return;
+        int ownerPromptCount = inbox.promptCount();
         List<String> parts = new ArrayList<>();
         // 身体正在后台跑异步任务:每个回合都把这行放在最前,模型不用调工具就知道
         // 手头有活(记账来自派发回执,收尾事件对上 id 即清,见 trackAsyncDispatch)。
@@ -883,6 +887,11 @@ public final class EntityAgentLoop {
         parts.addAll(inbox.drain());
         String merged = String.join("\n", parts);
         convo.addUser(merged);
+        if (ownerPromptCount > 0) {
+            // A new owner directive is a task boundary: converge full schemas
+            // back to the small baseline while retaining layer-one metadata.
+            toolDisclosure.resetForNewTask();
+        }
         // A fresh owner directive starts a new tool-chain: restart the turn
         // counter (just log numbering now that the hard cap is gone).
         convo.resetTurnCount();
@@ -955,7 +964,8 @@ public final class EntityAgentLoop {
         convo.incrementTurn();
         awaitingLlmResponse = true;
 
-        var tools = ToolRegistry.all();
+        toolDisclosure.beginTurn();
+        var tools = toolDisclosure.toolsForRequest();
         var snapshot = convo.snapshot();
         String systemPrompt = composeSystemPrompt();
 
@@ -1166,6 +1176,10 @@ public final class EntityAgentLoop {
         // immutable operating core (ENTITY_PROMPT) that follows.
         sb.append("<persona>\n").append(base.strip()).append("\n</persona>");
         sb.append(ENTITY_PROMPT);
+        String toolCatalog = toolDisclosure.formatCatalogXml();
+        if (!toolCatalog.isEmpty()) {
+            sb.append("\n\n").append(toolCatalog);
+        }
         if (!skillsXml.isEmpty()) {
             sb.append("\n\n").append(skillsXml);
         }
@@ -1241,7 +1255,7 @@ public final class EntityAgentLoop {
                 final int gen2 = turnGeneration;
                 final VoiceTurn vt2 = beginVoiceTurn();   // 重跑也重新开口(失败那次的半截语音随 beginTurn 作废)
                 livePartial.setLength(0);                 // 失败那次的半截文字同理作废
-                client().chatStreaming(convo.snapshot(), ToolRegistry.all(),
+                client().chatStreaming(convo.snapshot(), toolDisclosure.toolsForRequest(),
                                 composeSystemPrompt(), tapForUi(gen2, vt2.sink()))
                         .whenComplete((r2, e2) -> {
                             vt2.finish().run();

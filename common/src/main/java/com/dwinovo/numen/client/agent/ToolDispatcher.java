@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Executes one agent turn's tool calls and hands the results back — the entire
@@ -54,6 +55,8 @@ public final class ToolDispatcher {
 
     private final UUID entityUuid;
     private final Sink sink;
+    /** Per-agent visibility gate; the default constructor retains registry-wide behaviour. */
+    private final Function<String, NumenTool> toolResolver;
 
     /** This turn's remaining calls, drained one at a time. */
     private final Deque<ToolInvocation> queue = new ArrayDeque<>();
@@ -64,8 +67,18 @@ public final class ToolDispatcher {
     private long deadlineMillis = 0;
 
     public ToolDispatcher(UUID entityUuid, Sink sink) {
+        this(entityUuid, sink, ToolRegistry::resolve);
+    }
+
+    /**
+     * Construct with a per-agent resolver (used by progressive disclosure to
+     * prevent a hidden catalogue entry from bypassing discovery at execution).
+     */
+    public ToolDispatcher(UUID entityUuid, Sink sink,
+                          Function<String, NumenTool> toolResolver) {
         this.entityUuid = entityUuid;
         this.sink = sink;
+        this.toolResolver = toolResolver == null ? ToolRegistry::resolve : toolResolver;
     }
 
     /** Anything outstanding (in flight or still queued)? */
@@ -121,7 +134,7 @@ public final class ToolDispatcher {
                     sink.onAllSettled();
                     return;
                 }
-                NumenTool tool = ToolRegistry.resolve(inv.name());
+                NumenTool tool = toolResolver.apply(inv.name());
                 if (tool == null) {
                     Constants.LOG.warn("[numen-dispatch#{}] LLM called unknown tool '{}' (id={})",
                             entityUuid, inv.name(), inv.id());
@@ -130,7 +143,9 @@ public final class ToolDispatcher {
                 }
                 inFlight.put(inv.id(), inv);
                 deadlineMillis = System.currentTimeMillis() + TOOL_BACKSTOP_MILLIS;
-                ToolCall call = new ToolCall(inv.id(), inv.name(), inv.argsJson(),
+                // Use the resolved canonical name: lenient/case-insensitive lookup must
+                // not send the model's mis-cased spelling to an exact-match server registry.
+                ToolCall call = new ToolCall(inv.id(), tool.name(), inv.argsJson(),
                         new ClientToolContext(sink.entity(), entityUuid),
                         json -> complete(inv, json));
                 Constants.LOG.info("[numen-dispatch#{}] dispatch tool={} id={} args={}",
