@@ -22,10 +22,11 @@ public final class TaskStatusTool implements NumenTool {
 
     @Override
     public String description() {
-        return "Read the background task's live state: id, what it is, running/queued, elapsed time "
-                + "and remaining time budget. Instant; says so when the body is idle. Normally you "
-                + "don't need this — completion arrives by itself as a task_finished event; use it "
-                + "when the owner asks how it's going, or before deciding to task_stop.";
+        return "Read the ONE background task's live state without changing it: id, tool, running/queued, "
+                + "elapsed time and remaining budget. Use only when the owner explicitly asks for progress "
+                + "or before deciding whether to task_stop. Never call it merely because the owner says "
+                + "continue, never poll it, and never use an idle result as permission to repeat a completed "
+                + "step; task_finished arrives automatically and the todo/goal decides what comes next.";
     }
 
     @Override

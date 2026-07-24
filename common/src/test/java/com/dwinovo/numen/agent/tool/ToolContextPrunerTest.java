@@ -81,6 +81,28 @@ class ToolContextPrunerTest {
         assertEquals(history, result.messages());
     }
 
+    @Test
+    void preservesLatestTodoPlanWhilePruningOlderPayloads() {
+        List<ConvoState.Msg> history = new ArrayList<>();
+        history.add(user("build a base"));
+        history.add(calling("plan", "todowrite", "{\"todos\":[]}"));
+        history.add(new ConvoState.Msg.Tool("plan",
+                "{\"success\":true,\"todos\":[{\"content\":\"find iron\",\"status\":\"in_progress\"}]}"));
+        for (int i = 0; i < 8; i++) {
+            history.add(calling("work-" + i, "look_around", "{}"));
+            history.add(new ConvoState.Msg.Tool("work-" + i, "x".repeat(2_000)));
+        }
+        history.add(new ConvoState.Msg.Assistant(new AssistantTurn("Continuing.", List.of(), null)));
+
+        ToolContextPruner.Result result = ToolContextPruner.prune(history);
+
+        assertTrue(result.changed());
+        assertFalse(result.prunedToolCallIds().contains("plan"));
+        assertTrue(hasCall(result.messages(), "plan"));
+        assertTrue(result.messages().stream().anyMatch(message -> message instanceof ConvoState.Msg.Tool tool
+                && "plan".equals(tool.toolCallId())));
+    }
+
     private static List<ConvoState.Msg> completedHistory(int count, int resultChars) {
         List<ConvoState.Msg> history = new ArrayList<>();
         history.add(user("work"));

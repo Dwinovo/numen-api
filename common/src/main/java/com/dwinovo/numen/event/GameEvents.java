@@ -58,7 +58,14 @@ public final class GameEvents {
         attrs.put("id", taskId);
         attrs.put("task", tool);
         attrs.put("status", status);
-        emit(body, Kind.TASK_FINISHED, attrs, message);
+        attrs.put("terminal", "true");
+        String guidance = switch (status) {
+            case "done" -> " Requested step is complete: mark/advance the plan and do not repeat identical tool arguments.";
+            case "timeout" -> " Partial progress stopped at its budget; inspect the report, then the same call may be resumed if still needed.";
+            case "stopped" -> " The task was deliberately stopped; re-plan before any new body action.";
+            default -> " The step failed; use the reason to change the plan instead of retrying unchanged.";
+        };
+        emit(body, Kind.TASK_FINISHED, attrs, (message == null ? "" : message) + guidance);
     }
 
     /** XML 词汇表用尖括号,正文里的尖括号一律圆括号化,防注入也防解析歧义。 */

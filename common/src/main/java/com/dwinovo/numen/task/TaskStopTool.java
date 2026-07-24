@@ -26,9 +26,10 @@ public final class TaskStopTool implements NumenTool {
 
     @Override
     public String description() {
-        return "Abort the background task (the one <current_task> / task_status shows) so the body "
-                + "frees up for something else. The wind-down summary arrives as a task_finished "
-                + "event with status=stopped. Fails when the body is already idle.";
+        return "Abort the ONE background task identified by <current_task>. Use only when the owner "
+                + "explicitly asks to stop/change it, or verified new danger makes the active plan invalid; "
+                + "never stop healthy work merely to retry/rephrase the same action. The terminal summary "
+                + "arrives automatically as task_finished status=stopped. Fails safely when idle or task_id mismatches.";
     }
 
     @Override

@@ -23,6 +23,7 @@ import net.minecraft.client.resources.language.I18n;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -137,8 +138,18 @@ public final class EntityAgentLoop {
     /** 后台异步任务记账(派发回执置位,对上 id 的 task_finished 清零);null = 身体空闲。
      *  客户端自记账,不走新网络包:回执与事件本来就都经过这里。 */
     private CurrentTask currentTask;
+    /** 最近一次成功的后台调用；同一主人指令内禁止模型原样重复刚完成的步骤。 */
+    private CompletedTask lastCompletedTask;
+    /** 每次真正消费到新的主人 prompt 才递增；世界事件续链仍属于同一条指令。 */
+    private long ownerDirectiveGeneration;
 
-    private record CurrentTask(String id, String tool, long sinceMs) {}
+    private static final long COMPLETED_TASK_DEDUPE_MILLIS = 10 * 60_000L;
+    private static final Set<String> REPEATABLE_BACKGROUND_TOOLS = Set.of();
+
+    private record CurrentTask(String id, String tool, String arguments,
+                               String fingerprint, long directiveGeneration, long sinceMs) {}
+    private record CompletedTask(String id, String tool, String fingerprint,
+                                 long directiveGeneration, long completedMs) {}
 
     /**
      * This companion's persona (per-companion, dynamic). Sourced from the last {@code persona-change}
@@ -250,7 +261,7 @@ public final class EntityAgentLoop {
         this.dispatcher = new ToolDispatcher(entityUuid, new ToolDispatcher.Sink() {
             @Override public void onResult(ToolInvocation inv, String resultJson) {
                 harvestWorkBlocks(inv.name(), resultJson);
-                trackAsyncDispatch(inv.name(), resultJson);
+                trackAsyncDispatch(inv, resultJson);
                 convo.addToolResult(inv.id(), resultJson);
             }
             @Override public void onAllSettled() {
@@ -727,14 +738,22 @@ public final class EntityAgentLoop {
     }
 
     /** 派发回执识别:异步工具的受理结果带 data.async=true 与 data.task_id。 */
-    private void trackAsyncDispatch(String toolName, String resultJson) {
+    private void trackAsyncDispatch(ToolInvocation invocation, String resultJson) {
         try {
             com.google.gson.JsonObject o =
                     com.google.gson.JsonParser.parseString(resultJson).getAsJsonObject();
             if (!o.has("data") || !o.get("data").isJsonObject()) return;
             com.google.gson.JsonObject data = o.getAsJsonObject("data");
             if (data.has("async") && data.get("async").getAsBoolean() && data.has("task_id")) {
-                currentTask = new CurrentTask(data.get("task_id").getAsString(), toolName,
+                String fingerprint = ToolCallFingerprint.of(invocation.name(), invocation.argsJson());
+                // A genuinely different accepted task proves the previous completion is no longer
+                // the immediate step, so a later planned return to it is legitimate.
+                if (lastCompletedTask != null
+                        && !lastCompletedTask.fingerprint().equals(fingerprint)) {
+                    lastCompletedTask = null;
+                }
+                currentTask = new CurrentTask(data.get("task_id").getAsString(), invocation.name(),
+                        invocation.argsJson(), fingerprint, ownerDirectiveGeneration,
                         System.currentTimeMillis());
             }
         } catch (RuntimeException ignored) {
@@ -763,6 +782,11 @@ public final class EntityAgentLoop {
         boolean duringTask = currentTask != null;
         if (duringTask && xml.contains("kind=\"task_finished\"")
                 && xml.contains("id=\"" + currentTask.id() + "\"")) {
+            if (xml.contains("status=\"done\"")) {
+                lastCompletedTask = new CompletedTask(currentTask.id(), currentTask.tool(),
+                        currentTask.fingerprint(), currentTask.directiveGeneration(),
+                        System.currentTimeMillis());
+            }
             currentTask = null;
         }
         inbox.pushEvent(xml);
@@ -871,14 +895,8 @@ public final class EntityAgentLoop {
         if (inbox.isEmpty()) return;
         int ownerPromptCount = inbox.promptCount();
         List<String> parts = new ArrayList<>();
-        // 身体正在后台跑异步任务:每个回合都把这行放在最前,模型不用调工具就知道
-        // 手头有活(记账来自派发回执,收尾事件对上 id 即清,见 trackAsyncDispatch)。
-        if (currentTask != null) {
-            long secs = (System.currentTimeMillis() - currentTask.sinceMs()) / 1000;
-            parts.add("<current_task>" + currentTask.id() + " " + currentTask.tool()
-                    + " 后台进行中(已 " + secs + "s)。task_status 查进度,task_stop 叫停,"
-                    + "完成会自动收到 task_finished 事件,不要轮询。</current_task>");
-        }
+        // <current_task> 不再写进持久对话；它是会过期的运行态，由 modelContextSnapshot
+        // 在每次请求本地注入。否则任务完成后，旧 user 消息仍会永久声称它在运行。
         // <known_blocks> 随用户回合注入,不放系统提示:它随放置/使用工作站而变,
         // 放系统提示会打碎请求前缀的 prompt cache。系统提示(工具 schema+操作
         // 核心+人设)因此字节级稳定,支持缓存的服务商整段命中。
@@ -891,6 +909,7 @@ public final class EntityAgentLoop {
         String merged = String.join("\n", parts);
         convo.addUser(merged);
         if (ownerPromptCount > 0) {
+            ownerDirectiveGeneration++;
             // A new owner directive is a task boundary: converge full schemas
             // back to the small baseline while retaining layer-one metadata.
             toolDisclosure.resetForNewTask();
@@ -1175,7 +1194,21 @@ public final class EntityAgentLoop {
                     entityUuid, prunedCalls, result.removedToolResults(), result.removedPayloadChars());
         }
         lastReportedPrunedToolCalls = prunedCalls;
-        return result.messages();
+        return AgentRequestContext.attach(result.messages(), runtimeStateXml());
+    }
+
+    /** Request-local live state: present on every pulse while a background task runs, never persisted. */
+    private String runtimeStateXml() {
+        CurrentTask task = currentTask;
+        if (task == null) return "";
+        long elapsed = Math.max(0, System.currentTimeMillis() - task.sinceMs()) / 1000;
+        return "<runtime_state><current_task id=\"" + xml(task.id()) + "\" tool=\""
+                + xml(task.tool()) + "\" state=\"running\" elapsed_s=\"" + elapsed + "\">"
+                + "Original arguments: " + xml(truncate(task.arguments(), 600)) + ". "
+                + "This exact background call is ACTIVE. Do not dispatch it again and do not call "
+                + "another body-action tool. Wait for the matching task_finished event. Use task_status "
+                + "only when the owner explicitly asks for progress; use task_stop only to abort."
+                + "</current_task></runtime_state>";
     }
 
     private String composeSystemPrompt() {
@@ -1318,6 +1351,34 @@ public final class EntityAgentLoop {
             return;
         }
 
+        // Any inbox entry here arrived AFTER this request was dispatched. Executing tool calls from
+        // that stale world/owner snapshot caused the observed race: task_finished(t4) arrived while
+        // the model was thinking, but its old response still launched identical goto(t5). Record the
+        // assistant turn, settle every declared call with synthetic results (protocol-valid), then
+        // drain the fresh input and re-plan before touching the world.
+        if (ToolExecutionGuard.hasNewInput(inbox.promptCount(), inbox.eventCount())) {
+            Constants.LOG.info("[numen-entity#{}] rejecting {} stale tool call(s): {} new inbox item(s) arrived during planning",
+                    entityUuid, turn.toolCalls().size(), inbox.promptCount() + inbox.eventCount());
+            rejectToolBatch(turn.toolCalls(), "plan_superseded_by_new_input",
+                    "Not executed: new owner/world input arrived while this response was generated. "
+                            + "Read the newest context on the next pulse, update the plan, and do not retry blindly.");
+            return;
+        }
+
+        LlmToolCall duplicate = turn.toolCalls().stream()
+                .filter(this::duplicatesJustCompletedTask)
+                .findFirst().orElse(null);
+        if (duplicate != null) {
+            CompletedTask done = lastCompletedTask;
+            Constants.LOG.warn("[numen-entity#{}] rejecting duplicate completed call: tool={} task={}",
+                    entityUuid, duplicate.name(), done == null ? "?" : done.id());
+            rejectToolBatch(turn.toolCalls(), "duplicate_completed_task",
+                    "Not executed: this identical background call already completed successfully as "
+                            + (done == null ? "the previous task" : done.id()) + ". Advance the active todo/goal; "
+                            + "do not repeat a completed step unless the owner gives a new explicit instruction.");
+            return;
+        }
+
         // Hand this turn's calls to the dispatcher — it runs them serially and
         // reports each result back through the sink (into the conversation), then
         // calls onAllSettled so the loop starts the next turn.
@@ -1326,9 +1387,38 @@ public final class EntityAgentLoop {
                 .toList());
     }
 
+    private boolean duplicatesJustCompletedTask(LlmToolCall call) {
+        CompletedTask done = lastCompletedTask;
+        return done != null && call != null && ToolExecutionGuard.duplicatesCompleted(
+                done.fingerprint(), done.directiveGeneration(), ownerDirectiveGeneration,
+                done.completedMs(), System.currentTimeMillis(), COMPLETED_TASK_DEDUPE_MILLIS,
+                REPEATABLE_BACKGROUND_TOOLS, call.name(), call.arguments());
+    }
+
+    /** Settle an entire model-declared batch without executing any member, preserving tool protocol. */
+    private void rejectToolBatch(List<LlmToolCall> calls, String code, String message) {
+        for (LlmToolCall call : calls) {
+            JsonObject result = new JsonObject();
+            result.addProperty("success", false);
+            result.addProperty("code", code);
+            result.addProperty("message", message);
+            convo.addToolResult(call.id(), result.toString());
+        }
+        tryStartTurn();
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
+    private static String xml(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private static String unwrap(Throwable t) {

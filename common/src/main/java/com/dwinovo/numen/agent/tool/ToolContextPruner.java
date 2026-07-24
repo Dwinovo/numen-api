@@ -31,6 +31,8 @@ public final class ToolContextPruner {
     static final int MIN_BATCH_TRANSACTIONS = 4;
     static final int MIN_BATCH_CHARS = 8_000;
     static final int MAX_RETAINED_CHARS = 24_000;
+    /** Latest state snapshot from each semantic-state tool must survive payload pruning. */
+    private static final Set<String> STATEFUL_TOOL_NAMES = Set.of("todowrite");
 
     private ToolContextPruner() {}
 
@@ -53,7 +55,10 @@ public final class ToolContextPruner {
     public static Result prune(List<ConvoState.Msg> messages) {
         if (messages == null || messages.isEmpty()) return unchanged(messages);
 
-        List<Transaction> eligible = eligibleTransactions(messages);
+        Set<String> protectedState = latestStatefulCallIds(messages);
+        List<Transaction> eligible = eligibleTransactions(messages).stream()
+                .filter(transaction -> !protectedState.contains(transaction.id()))
+                .toList();
         if (eligible.isEmpty()) return unchanged(messages);
 
         // Retain the newest few consumed transactions while they fit the payload budget. Always
@@ -118,6 +123,25 @@ public final class ToolContextPruner {
         }
 
         return new Result(pruned, candidates, removedAssistants, removedResults, candidateChars);
+    }
+
+    /** Keep only the newest call for each stateful tool; older snapshots remain normally prunable. */
+    private static Set<String> latestStatefulCallIds(List<ConvoState.Msg> messages) {
+        Set<String> foundTools = new LinkedHashSet<>();
+        Set<String> ids = new LinkedHashSet<>();
+        for (int i = messages.size() - 1; i >= 0 && foundTools.size() < STATEFUL_TOOL_NAMES.size(); i--) {
+            if (!(messages.get(i) instanceof ConvoState.Msg.Assistant assistant)) continue;
+            List<LlmToolCall> calls = assistant.turn().toolCalls();
+            for (int j = calls.size() - 1; j >= 0; j--) {
+                LlmToolCall call = calls.get(j);
+                String name = call.name() == null ? "" : call.name().strip().toLowerCase(java.util.Locale.ROOT);
+                if (STATEFUL_TOOL_NAMES.contains(name) && foundTools.add(name)
+                        && call.id() != null && !call.id().isBlank()) {
+                    ids.add(call.id());
+                }
+            }
+        }
+        return ids;
     }
 
     private static List<Transaction> eligibleTransactions(List<ConvoState.Msg> messages) {

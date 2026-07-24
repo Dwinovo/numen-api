@@ -52,18 +52,22 @@ public final class TaskDispatch {
         // 内置大脑靠 task_finished 事件收尾(别轮询);外部(MCP)夺舍收不到事件(那条投给内置大脑,
         // 不是它),得自己轮询 task_status 到身体空闲,再感知确认。
         String note = record.isExternalCall()
-                ? "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。"
-                : "已受理,后台执行中。完成会自动收到 task_finished 事件,不要轮询;task_status 查进度,task_stop 叫停。";
+                ? "ACCEPTED: 后台执行中。外部驱动可用 task_status 查看,身体转空闲后再感知确认;task_stop 叫停。"
+                : "ACCEPTED: 这一步已经在后台执行。现在不要重复此调用、不要派另一件身体动作、不要轮询;"
+                        + "等待同 id 的 task_finished。done=此步完成并推进计划,只有 timeout 才可原样续派。";
         reply.accept(TaskResult.ok(
                 note,
                 java.util.Map.of(
                         "task_id", record.publicId(),
                         "task", record.getToolName(),
-                        "async", true)).toJson());
+                        "state", "running",
+                        "async", true,
+                        "repeat_before_finished", false)).toJson());
     }
 
     private static String busyMessage(TaskRecord busy) {
-        return "身体正忙: " + busy.publicId() + "(" + busy.describe()
-                + ") 后台进行中。先 task_stop 叫停,或等它的 task_finished 事件再派新活。";
+        return "REJECTED_NOT_EXECUTED: 身体正忙: " + busy.publicId() + "(" + busy.describe()
+                + ") 后台进行中。不要重试本调用、不要轮询;等待它的 task_finished。"
+                + "只有确实要放弃当前任务时才先 task_stop。";
     }
 }

@@ -65,7 +65,13 @@ class ToolDisclosureSessionTest {
 
         assertEquals(0, hidden.calls);
         assertTrue(result.contains("tool_not_disclosed"));
+        assertTrue(result.contains("Do NOT call discover_tools"));
         assertTrue(names(session.toolsForRequest()).contains("build"));
+
+        String redundantDiscovery = invoke(session.resolveForExecution("discover_tools"),
+                "{\"names\":[\"build\"]}");
+        assertTrue(redundantDiscovery.contains("already active"));
+        assertTrue(redundantDiscovery.contains("Do not call discover_tools again"));
     }
 
     @Test

@@ -135,7 +135,8 @@ public final class ToolDisclosureSession {
         sb.append("<tool_disclosure>\n")
                 .append("The catalogue below is metadata only. The complete schemas currently present in the API tool list are the only tools you may call. ")
                 .append("When a catalogue entry is needed but its schema is absent, call discover_tools with its exact name first. ")
-                .append("Never guess hidden parameters. Disclosures are request-local and may expire, so rediscover a tool if it is no longer present.\n")
+                .append("Never guess hidden parameters. If tool_not_disclosed says a guessed tool was auto-activated, call that tool directly on the next pulse; do NOT call discover_tools for it again. ")
+                .append("Disclosures are request-local and may expire, so rediscover a tool only if it is actually absent again.\n")
                 .append("<tool_catalog>\n");
         for (NumenTool tool : all) {
             if (DISCOVERY_TOOL_NAME.equals(key(tool.name()))) continue;
@@ -197,9 +198,15 @@ public final class ToolDisclosureSession {
 
         boolean ok = disclosed.size() > 0 || already.size() > 0;
         result.addProperty("success", ok);
-        result.addProperty("message", ok
-                ? "Full definitions for the disclosed tools will be attached to the next request pulse."
-                : "No matching tools were disclosed; use exact names from <tool_catalog>.");
+        String message;
+        if (disclosed.size() > 0) {
+            message = "Requested schemas are now active and will be attached to the next request. Call those tools directly next; do not discover them again.";
+        } else if (already.size() > 0) {
+            message = "All requested schemas were already active. Do not call discover_tools again; call the requested tools directly on the next response.";
+        } else {
+            message = "No matching tools were disclosed; use exact names from <tool_catalog>.";
+        }
+        result.addProperty("message", message);
         result.add("disclosed", disclosed);
         result.add("already_available", already);
         result.add("not_found", missing);
@@ -250,7 +257,9 @@ public final class ToolDisclosureSession {
         public String description() {
             return "Reveal complete definitions and parameter schemas for up to "
                     + MAX_DISCOVERY_NAMES + " tools from <tool_catalog>. Use exact catalogue names. "
-                    + "This only loads schemas for the next request; it does not perform the tools.";
+                    + "This only loads schemas for the next request; it does not perform the tools. "
+                    + "Never use it for a tool_not_disclosed result that says the schema was auto-activated; "
+                    + "in that case call the requested tool directly on the next response.";
         }
 
         @Override
@@ -298,7 +307,8 @@ public final class ToolDisclosureSession {
             result.addProperty("success", false);
             result.addProperty("code", "tool_not_disclosed");
             result.addProperty("message", "Tool '" + actual.name()
-                    + "' was not active, so guessed arguments were not executed. Its full schema is now attached; call it again next turn using that schema.");
+                    + "' was not active, so guessed arguments were not executed. Its full schema has now been AUTO-ACTIVATED for the next request. "
+                    + "Do NOT call discover_tools for it; retry '" + actual.name() + "' directly once using the attached schema.");
             call.complete(GSON.toJson(result));
         }
     }
