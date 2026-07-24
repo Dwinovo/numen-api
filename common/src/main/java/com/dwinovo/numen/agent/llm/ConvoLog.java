@@ -1,6 +1,7 @@
 package com.dwinovo.numen.agent.llm;
 
 import com.dwinovo.numen.Constants;
+import com.dwinovo.numen.agent.goal.GoalState;
 import com.dwinovo.numen.agent.provider.AssistantTurn;
 import com.dwinovo.numen.agent.provider.LlmToolCall;
 import com.google.gson.JsonArray;
@@ -34,7 +35,8 @@ import java.util.UUID;
  *   <li><b>Messages</b> — the v1 shape, keyed by {@code role} = {@code user}/{@code assistant}/{@code tool},
  *       plus optional additive metadata ({@code ts}, and reserved {@code model}/{@code usage}).</li>
  *   <li><b>Events</b> — keyed by {@code type}, no {@code role}: {@code compact}, {@code persona-change},
- *       and the reserved {@code goal}. Events carry state, not conversation.</li>
+ *       and {@code goal}. Events carry state, not conversation; Goal events are last-wins lifecycle
+ *       snapshots (including a clear tombstone).</li>
  * </ul>
  * <b>Discriminator rule:</b> a record with a {@code type} field is an event; otherwise it's a message
  * dispatched on {@code role}. The legacy v1 {@code role:"compact"} line is read as a {@code compact} event.
@@ -75,7 +77,7 @@ public final class ConvoLog {
     private static final String EV_HEADER = "header";
     private static final String EV_COMPACT = "compact";
     private static final String EV_PERSONA = "persona-change";
-    private static final String EV_GOAL = "goal";   // reserved (recognized, no behavior yet)
+    private static final String EV_GOAL = "goal";
 
     private final Path file;
 
@@ -140,6 +142,33 @@ public final class ConvoLog {
         if (id != null && !id.isBlank()) o.addProperty("id", id);
         o.addProperty("content", text == null ? "" : text);
         if (name != null && !name.isBlank()) o.addProperty("name", name);
+        o.addProperty("ts", System.currentTimeMillis());
+        writeLine(o);
+    }
+
+    /** Append the latest thread-scoped Goal state. Last event wins; it never enters model history. */
+    public void appendGoalState(GoalState goal) {
+        if (goal == null) return;
+        JsonObject o = new JsonObject();
+        o.addProperty("type", EV_GOAL);
+        o.addProperty("id", goal.id());
+        o.addProperty("content", goal.objective());
+        o.addProperty("status", goal.status().wireName());
+        o.addProperty("budget", goal.continuationBudget());
+        o.addProperty("continuations", goal.continuationsUsed());
+        o.addProperty("reviews", goal.reviews());
+        if (!goal.lastReason().isBlank()) o.addProperty("reason", goal.lastReason());
+        if (!goal.nextStep().isBlank()) o.addProperty("next_step", goal.nextStep());
+        o.addProperty("created", goal.createdAt());
+        o.addProperty("ts", goal.updatedAt());
+        writeLine(o);
+    }
+
+    /** Append a Goal tombstone so clearing remains event-sourced and survives relaunch. */
+    public void appendGoalCleared() {
+        JsonObject o = new JsonObject();
+        o.addProperty("type", EV_GOAL);
+        o.addProperty("status", "cleared");
         o.addProperty("ts", System.currentTimeMillis());
         writeLine(o);
     }
@@ -280,6 +309,7 @@ public final class ConvoLog {
                         }
                     }
                     // header / persona-change / goal / unknown → not part of the LLM context
+                    // (active Goal state is injected request-locally by EntityAgentLoop)
                     continue;
                 }
                 ConvoState.Msg m = decodeMessage(o);             // message record
@@ -324,7 +354,7 @@ public final class ConvoLog {
                 if (type != null) {                              // event record
                     if (EV_COMPACT.equals(type)) all.add(new ConvoState.Msg.User(COMPACT_DIVIDER));
                     else if (EV_PERSONA.equals(type)) all.add(new ConvoState.Msg.User(PERSONA_DIVIDER));
-                    // header / goal / unknown → not shown
+                    // header / goal / unknown → not shown (Goal commands/notices are local UI entries)
                     continue;
                 }
                 ConvoState.Msg m = decodeMessage(o);
@@ -352,6 +382,35 @@ public final class ConvoLog {
             }
         } catch (IOException ex) {
             Constants.LOG.warn("[numen-convo] failed to read persona from {}: {}", file, ex.toString());
+        }
+        return current;
+    }
+
+    /** The current Goal from the latest {@code goal} event, or {@code null} after a clear/no Goal. */
+    public GoalState loadCurrentGoal() {
+        if (!Files.isRegularFile(file)) return null;
+        GoalState current = null;
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                if (line.isBlank()) continue;
+                JsonObject o = tryParse(line);
+                if (o == null || !EV_GOAL.equals(eventType(o))) continue;
+                String status = str(o.get("status"));
+                if ("cleared".equals(status)) {
+                    current = null;
+                    continue;
+                }
+                String objective = str(o.get("content"));
+                if (objective.isBlank()) continue;
+                long updated = longValue(o, "ts", System.currentTimeMillis());
+                long created = longValue(o, "created", updated);
+                current = new GoalState(str(o.get("id")), objective, GoalState.Status.parse(status),
+                        intValue(o, "budget", GoalState.DEFAULT_CONTINUATION_BUDGET),
+                        intValue(o, "continuations", 0), intValue(o, "reviews", 0),
+                        str(o.get("reason")), str(o.get("next_step")), created, updated);
+            }
+        } catch (IOException ex) {
+            Constants.LOG.warn("[numen-convo] failed to read goal from {}: {}", file, ex.toString());
         }
         return current;
     }
@@ -464,5 +523,21 @@ public final class ConvoLog {
 
     private static String str(JsonElement el) {
         return el == null || el.isJsonNull() ? "" : el.getAsString();
+    }
+
+    private static int intValue(JsonObject object, String key, int fallback) {
+        try {
+            return object.has(key) ? object.get(key).getAsInt() : fallback;
+        } catch (RuntimeException ex) {
+            return fallback;
+        }
+    }
+
+    private static long longValue(JsonObject object, String key, long fallback) {
+        try {
+            return object.has(key) ? object.get(key).getAsLong() : fallback;
+        } catch (RuntimeException ex) {
+            return fallback;
+        }
     }
 }

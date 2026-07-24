@@ -470,6 +470,22 @@ public final class SettingsView {
                 });
         if (learning) learn.primary();
         host.add(learn);
+
+        boolean goals = Services.CONFIG.isGoalSupervisionEnabled();
+        SimpleButton goal = new SimpleButton(x + w - 72, secY0() + 149, 72, 18,
+                Component.translatable(goals ? "numen.observation.on" : "numen.observation.off"), b -> {
+                    boolean enabled = !Services.CONFIG.isGoalSupervisionEnabled();
+                    Services.CONFIG.setGoalSupervisionEnabled(enabled);
+                    Services.CONFIG.save();
+                    if (!enabled) {
+                        for (UUID id : AgentLoopRegistry.loadedEntityUuids()) {
+                            AgentLoopRegistry.get(id).ifPresent(EntityAgentLoop::onGoalSupervisionDisabled);
+                        }
+                    }
+                    host.rebuild();
+                });
+        if (goals) goal.primary();
+        host.add(goal);
     }
 
     // ---- Proxy section: the global network proxy, its own tab (IP + port) ----
@@ -1661,6 +1677,8 @@ public final class SettingsView {
         txt(g, Component.translatable("numen.observation.mode"), x, secY0() + 36, TXT_FAINT);
         txt(g, Component.translatable("numen.observation.auto_skill"), x, secY0() + 82, TXT_MUTED);
         txt(g, Component.translatable("numen.observation.auto_skill_hint"), x, secY0() + 114, TXT_FAINT);
+        txt(g, Component.translatable("numen.goal.setting"), x, secY0() + 139, TXT_MUTED);
+        txt(g, Component.translatable("numen.goal.setting_hint"), x, secY0() + 171, TXT_FAINT);
     }
 
     /** 主题选择:五套配色一行一个(三色小样 + 名字),点击即切换并写入 ui.json。 */

@@ -71,6 +71,15 @@ final class Inbox {
         return n;
     }
 
+    /** Remove only internal Goal continuation/resume pulses; world facts remain untouched. */
+    int clearGoalEvents() {
+        int before = events.size();
+        events.removeIf(entry -> entry.text().startsWith("<goal_"));
+        int removed = before - events.size();
+        if (removed > 0) persist();
+        return removed;
+    }
+
     /** 死亡冻结:全清。 */
     void clearAll() {
         events.clear();

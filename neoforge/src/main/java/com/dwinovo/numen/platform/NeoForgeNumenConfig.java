@@ -30,6 +30,7 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     public static final ModConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
     public static final ModConfigSpec.ConfigValue<String> OBSERVATION_MODE;
     public static final ModConfigSpec.BooleanValue AUTO_SKILL_LEARNING;
+    public static final ModConfigSpec.BooleanValue GOAL_SUPERVISION;
     public static final ModConfigSpec.ConfigValue<String> STT_PROVIDER;
     public static final ModConfigSpec.ConfigValue<String> STT_API_KEY;
     public static final ModConfigSpec.ConfigValue<String> STT_BASE_URL;
@@ -88,6 +89,11 @@ public final class NeoForgeNumenConfig implements INumenConfig {
         AUTO_SKILL_LEARNING = b.comment(
                 "Automatically summarize novel reusable successful workflows into config/numen/skills.")
                 .define("auto_skill_learning", true);
+        GOAL_SUPERVISION = b.comment(
+                "Enable the opt-in /goal self-supervision loop.",
+                "Each audit is one extra sequential call to the companion's existing API/model.",
+                "Off by default; /goal pause, /goal clear, and Stop remain owner-controlled.")
+                .define("goal_supervision", false);
         b.pop();
 
         b.comment("Voice input (STT) — global, one microphone / one transcription service.").push("stt");
@@ -156,6 +162,11 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     @Override
     public boolean isAutoSkillLearningEnabled() {
         try { return AUTO_SKILL_LEARNING.get(); } catch (IllegalStateException ex) { return true; }
+    }
+
+    @Override
+    public boolean isGoalSupervisionEnabled() {
+        try { return GOAL_SUPERVISION.get(); } catch (IllegalStateException ex) { return false; }
     }
 
     @Override
@@ -229,6 +240,11 @@ public final class NeoForgeNumenConfig implements INumenConfig {
     @Override
     public void setAutoSkillLearningEnabled(boolean value) {
         AUTO_SKILL_LEARNING.set(value);
+    }
+
+    @Override
+    public void setGoalSupervisionEnabled(boolean value) {
+        GOAL_SUPERVISION.set(value);
     }
 
     @Override

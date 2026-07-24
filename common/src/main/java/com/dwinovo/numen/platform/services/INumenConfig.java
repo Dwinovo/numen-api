@@ -86,6 +86,12 @@ public interface INumenConfig {
     /** Whether reusable, previously-unskilled successful workflows may be summarized into Skills. */
     default boolean isAutoSkillLearningEnabled() { return true; }
 
+    /**
+     * Whether the opt-in {@code /goal} loop may make sequential, tool-free supervisor calls and
+     * continue an idle thread. Disabled by default because each audit consumes an extra API request.
+     */
+    default boolean isGoalSupervisionEnabled() { return false; }
+
     // ---- write surface (client-side: invoked by SettingsScreen) ----
 
     /**
@@ -109,6 +115,9 @@ public interface INumenConfig {
 
     /** Optional mutation hook for automatic Skill learning. */
     default void setAutoSkillLearningEnabled(boolean value) {}
+
+    /** Optional mutation hook for self-supervised Goals. */
+    default void setGoalSupervisionEnabled(boolean value) {}
 
     /** Set the reasoning effort ({@code auto}/{@code low}/{@code medium}/{@code high}). Caller must {@link #save()}. */
     void setReasoningEffort(String value);

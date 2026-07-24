@@ -670,7 +670,9 @@ public final class NumenScreen extends Screen {
         // key): unbound / keyless surfaces as a visible hint, never a crash or a
         // silent no-op — the no-provider safety net.
         String problem = loop().endpointProblem();
-        if (problem != null) {
+        // /goal status/lifecycle/on/off are local controls and must remain usable even when the
+        // endpoint is missing. Starting/resuming a Goal performs its own endpoint check in the loop.
+        if (problem != null && !EntityAgentLoop.isGoalCommand(text)) {
             com.dwinovo.numen.Constants.LOG.warn("[numen-chat] {}", problem);
             warnText = problem;
             warnUntil = System.currentTimeMillis() + 4000;

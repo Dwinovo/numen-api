@@ -168,6 +168,9 @@ public final class FabricNumenConfig implements INumenConfig {
     @Override
     public boolean isAutoSkillLearningEnabled() { return data.autoSkillLearning == null || data.autoSkillLearning; }
 
+    @Override
+    public boolean isGoalSupervisionEnabled() { return data.goalSupervision != null && data.goalSupervision; }
+
     // ---- mutations ----
 
     @Override
@@ -196,6 +199,9 @@ public final class FabricNumenConfig implements INumenConfig {
 
     @Override
     public void setAutoSkillLearningEnabled(boolean value) { data.autoSkillLearning = value; }
+
+    @Override
+    public void setGoalSupervisionEnabled(boolean value) { data.goalSupervision = value; }
 
     @Override
     public String getSttProvider() { return data.sttProvider == null || data.sttProvider.isBlank() ? "siliconflow" : data.sttProvider; }
@@ -253,7 +259,7 @@ public final class FabricNumenConfig implements INumenConfig {
      */
     public static final class ConfigData {
         /** Free-form note for human readers; ignored by the loader. */
-        public String _readme = "Numen mod configuration. Set 'apiKey' (required). 'provider' picks the wire-format adapter. observationMode is an explicit choice: structured (default, no image) | hybrid (image + original observations) | visual. Numen does not infer vision support from model names. autoSkillLearning controls learning reusable unknown workflows. Field names are camelCase.";
+        public String _readme = "Numen mod configuration. Set 'apiKey' (required). 'provider' picks the wire-format adapter. observationMode is an explicit choice: structured (default, no image) | hybrid (image + original observations) | visual. Numen does not infer vision support from model names. autoSkillLearning controls learning reusable unknown workflows. goalSupervision enables the opt-in /goal supervisor loop and is off by default. Field names are camelCase.";
         public String apiKey = "";
         public String baseUrl = "";
         public String model = "gpt-5-2-mini";
@@ -262,6 +268,7 @@ public final class FabricNumenConfig implements INumenConfig {
         public String reasoningEffort = "auto";   // auto | low | medium | high (reasoning-capable models)
         public String observationMode = "structured"; // explicit opt-in: structured | hybrid | visual
         public Boolean autoSkillLearning = true;
+        public Boolean goalSupervision = false; // opt-in: each Goal audit is an extra sequential API call
         // STT (voice input) — global. provider picks the preset; empty apiKey = disabled.
         public String sttProvider = "siliconflow";
         public String sttApiKey = "";
@@ -290,6 +297,7 @@ public final class FabricNumenConfig implements INumenConfig {
             if (reasoningEffort == null || reasoningEffort.isBlank()) reasoningEffort = d.reasoningEffort;
             if (observationMode == null || observationMode.isBlank()) observationMode = d.observationMode;
             if (autoSkillLearning == null) autoSkillLearning = d.autoSkillLearning;
+            if (goalSupervision == null) goalSupervision = d.goalSupervision;
             if (systemPrompt == null) systemPrompt = d.systemPrompt;
             if (sttProvider == null || sttProvider.isBlank()) sttProvider = d.sttProvider;
             if (sttApiKey == null) sttApiKey = d.sttApiKey;
