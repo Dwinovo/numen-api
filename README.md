@@ -28,7 +28,7 @@
 
 - **客户端对话回路**（`EntityAgentLoop`）——听一句话 → 选一个工具 → 干活 → 看结果 → 决定下一步。这条回路跑在**玩家自己的游戏客户端**上，用**玩家自己的 API key**。
 - **工具契约**——`NumenTool` / `ToolRegistry` / `ToolCall` / `TaskResult`。工具就是同伴能调用的一种能力；引擎负责调度它，并把结果送回对话。
-- **渐进式工具披露**——首轮只提供工具名称与一句简介；模型按需调用 `discover_tools` 后，完整说明和参数 schema 才进入后续请求，并以 LRU 与闲置期限自动收敛工具面。
+- **渐进式工具披露与自动工具剪枝**——首轮只提供工具名称与一句简介；模型按需调用 `discover_tools` 后，完整说明和参数 schema 才进入后续请求，并以 LRU 与闲置期限自动收敛工具面。工具结果被后续模型回复消费后，旧 call/result 会按保守批次自动退出请求上下文；近期与尚未消费的事务保留，追加式历史日志完全不改动。
 - **兼容 OpenAI 接口的模型接入**——DeepSeek、DashScope（通义千问）、OpenAI、Moonshot（Kimi）、Zhipu（GLM）、Minimax、SiliconFlow、Volcengine（豆包）。传输层用 JDK 自带的 `HttpClient` + Gson 手搓，**不带任何第三方运行时依赖**。
 - **对话记忆**——跨存档持久化，聊长了自动摘要压缩（Claude Code 式的压缩策略）。
 - **同伴身体**——`NumenPlayer`，一个服务端的"真玩家"（`ServerPlayer`）。每个动作都走原版玩家的代码路径，所以红石、怪物、容器、别人的 mod 天生都拿它当真玩家对待。
