@@ -160,6 +160,14 @@ public final class FabricNumenConfig implements INumenConfig {
     @Override
     public String getReasoningEffort() { return data.reasoningEffort == null ? "auto" : data.reasoningEffort; }
 
+    @Override
+    public String getObservationMode() {
+        return data.observationMode == null || data.observationMode.isBlank() ? "structured" : data.observationMode;
+    }
+
+    @Override
+    public boolean isAutoSkillLearningEnabled() { return data.autoSkillLearning == null || data.autoSkillLearning; }
+
     // ---- mutations ----
 
     @Override
@@ -182,6 +190,12 @@ public final class FabricNumenConfig implements INumenConfig {
 
     @Override
     public void setSystemPrompt(String value) { data.systemPrompt = value == null ? "" : value; }
+
+    @Override
+    public void setObservationMode(String value) { data.observationMode = value == null ? "structured" : value; }
+
+    @Override
+    public void setAutoSkillLearningEnabled(boolean value) { data.autoSkillLearning = value; }
 
     @Override
     public String getSttProvider() { return data.sttProvider == null || data.sttProvider.isBlank() ? "siliconflow" : data.sttProvider; }
@@ -239,13 +253,15 @@ public final class FabricNumenConfig implements INumenConfig {
      */
     public static final class ConfigData {
         /** Free-form note for human readers; ignored by the loader. */
-        public String _readme = "Numen mod configuration. Set 'apiKey' (required). 'provider' picks the wire-format adapter AND its default base URL: openai | deepseek | moonshot (alias kimi) | minimax | volcengine (alias doubao, ark) | dashscope (alias qwen, tongyi, aliyun). Set 'baseUrl' only if you need to override the provider default (e.g. self-hosted proxy or non-default region). 'model' is whatever the backend recognises. Field names are camelCase. Restart for changes to take effect.";
+        public String _readme = "Numen mod configuration. Set 'apiKey' (required). 'provider' picks the wire-format adapter. observationMode is an explicit choice: structured (default, no image) | hybrid (image + original observations) | visual. Numen does not infer vision support from model names. autoSkillLearning controls learning reusable unknown workflows. Field names are camelCase.";
         public String apiKey = "";
         public String baseUrl = "";
         public String model = "gpt-5-2-mini";
         public String provider = "openai";
         public String proxy = "";   // optional host:port HTTP proxy for LLM calls
         public String reasoningEffort = "auto";   // auto | low | medium | high (reasoning-capable models)
+        public String observationMode = "structured"; // explicit opt-in: structured | hybrid | visual
+        public Boolean autoSkillLearning = true;
         // STT (voice input) — global. provider picks the preset; empty apiKey = disabled.
         public String sttProvider = "siliconflow";
         public String sttApiKey = "";
@@ -272,6 +288,8 @@ public final class FabricNumenConfig implements INumenConfig {
             if (provider == null || provider.isBlank()) provider = d.provider;
             if (proxy == null) proxy = d.proxy;
             if (reasoningEffort == null || reasoningEffort.isBlank()) reasoningEffort = d.reasoningEffort;
+            if (observationMode == null || observationMode.isBlank()) observationMode = d.observationMode;
+            if (autoSkillLearning == null) autoSkillLearning = d.autoSkillLearning;
             if (systemPrompt == null) systemPrompt = d.systemPrompt;
             if (sttProvider == null || sttProvider.isBlank()) sttProvider = d.sttProvider;
             if (sttApiKey == null) sttApiKey = d.sttApiKey;

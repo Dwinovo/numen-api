@@ -64,7 +64,7 @@ public final class SettingsView {
     }
 
     /** The config hub's sections, in nav order. */
-    private enum Section { PROVIDER, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, STT, THEME }
+    private enum Section { PROVIDER, OBSERVATION, PROXY, MCP, SKILLS, PERSONA, VOICE, SKIN, STT, THEME }
 
     // ---- layout constants (mirror the screen's) ----
     private static final int PAD = 8;
@@ -407,6 +407,7 @@ public final class SettingsView {
     public void buildWidgets() {
         loadPalette();
         switch (section) {
+            case OBSERVATION -> buildObservationWidgets();
             case SKILLS -> buildSkillsWidgets();
             case MCP -> {
                 if (mcpDeletePending != null) buildMcpDeleteConfirm();
@@ -437,6 +438,38 @@ public final class SettingsView {
             case STT -> buildSttWidgets();
             case THEME -> { /* no widgets — plain click rows */ }
         }
+    }
+
+    // ---- Observation section: structured / hybrid / pure visual + automatic Skill learning ----
+
+    private void buildObservationWidgets() {
+        int x = secX(), w = secW();
+        int gap = 4;
+        int bw = (w - gap * 2) / 3;
+        String current = com.dwinovo.numen.client.vision.ObservationMode
+                .parse(Services.CONFIG.getObservationMode()).name().toLowerCase(java.util.Locale.ROOT);
+        String[] ids = {"structured", "hybrid", "visual"};
+        String[] keys = {"numen.observation.structured", "numen.observation.hybrid", "numen.observation.visual"};
+        for (int i = 0; i < ids.length; i++) {
+            final String id = ids[i];
+            SimpleButton button = new SimpleButton(x + i * (bw + gap), secY0() + 48, bw, 18,
+                    Component.translatable(keys[i]), b -> {
+                        Services.CONFIG.setObservationMode(id);
+                        Services.CONFIG.save();
+                        host.rebuild();
+                    });
+            if (id.equals(current)) button.primary();
+            host.add(button);
+        }
+        boolean learning = Services.CONFIG.isAutoSkillLearningEnabled();
+        SimpleButton learn = new SimpleButton(x + w - 72, secY0() + 92, 72, 18,
+                Component.translatable(learning ? "numen.observation.on" : "numen.observation.off"), b -> {
+                    Services.CONFIG.setAutoSkillLearningEnabled(!Services.CONFIG.isAutoSkillLearningEnabled());
+                    Services.CONFIG.save();
+                    host.rebuild();
+                });
+        if (learning) learn.primary();
+        host.add(learn);
     }
 
     // ---- Proxy section: the global network proxy, its own tab (IP + port) ----
@@ -1601,6 +1634,7 @@ public final class SettingsView {
                 6, th.surface(), th.surfaceBorder());
         renderSettingsNav(g, mouseX, mouseY);
         switch (section) {
+            case OBSERVATION -> renderObservationSection(g);
             case MCP -> renderMcpSection(g, mouseX, mouseY);
             case SKILLS -> renderSkillsSection(g, mouseX, mouseY);
             case PERSONA -> renderPersonaSection(g, mouseX, mouseY);
@@ -1618,6 +1652,15 @@ public final class SettingsView {
             com.dwinovo.numen.client.ui.ConfirmModal.render(g, font(), host.railX(),
                     left() + panelW(), top(), panelH(), modal, null);
         }
+    }
+
+    private void renderObservationSection(GuiGraphics g) {
+        int x = secX();
+        txt(g, Component.translatable("numen.observation.title"), x, secY0() - 2, TXT);
+        txt(g, Component.translatable("numen.observation.description"), x, secY0() + 16, TXT_MUTED);
+        txt(g, Component.translatable("numen.observation.mode"), x, secY0() + 36, TXT_FAINT);
+        txt(g, Component.translatable("numen.observation.auto_skill"), x, secY0() + 82, TXT_MUTED);
+        txt(g, Component.translatable("numen.observation.auto_skill_hint"), x, secY0() + 114, TXT_FAINT);
     }
 
     /** 主题选择:五套配色一行一个(三色小样 + 名字),点击即切换并写入 ui.json。 */
@@ -1730,8 +1773,8 @@ public final class SettingsView {
     /** The config-hub left sub-nav + the divider. */
     private void renderSettingsNav(GuiGraphics g, int mouseX, int mouseY) {
         String[] labels = {
-                I18n.get(ModLanguageData.Keys.PROVIDER_TITLE), I18n.get("numen.settings.proxy"),
-                I18n.get("numen.settings.nav.mcp"),
+                I18n.get(ModLanguageData.Keys.PROVIDER_TITLE), I18n.get("numen.settings.nav.observation"),
+                I18n.get("numen.settings.proxy"), I18n.get("numen.settings.nav.mcp"),
                 I18n.get("numen.settings.nav.skills"), I18n.get("numen.settings.nav.persona"),
                 I18n.get(ModLanguageData.Keys.VOICE_TITLE),
                 I18n.get(ModLanguageData.Keys.SKIN_TITLE),

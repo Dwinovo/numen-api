@@ -74,6 +74,18 @@ public interface INumenConfig {
      */
     String getSystemPrompt();
 
+    /**
+     * Agent observation mode, selected explicitly by the user: {@code structured} keeps the
+     * original tool/text observations and sends no image; {@code hybrid} adds a low-cost
+     * first-person orientation frame at each user/event turn; {@code visual} requests a fresh,
+     * high-detail frame on every pulse and omits automatic known-block text only when capture
+     * succeeds. Numen never guesses image capability from the configured model id.
+     */
+    default String getObservationMode() { return "structured"; }
+
+    /** Whether reusable, previously-unskilled successful workflows may be summarized into Skills. */
+    default boolean isAutoSkillLearningEnabled() { return true; }
+
     // ---- write surface (client-side: invoked by SettingsScreen) ----
 
     /**
@@ -91,6 +103,12 @@ public interface INumenConfig {
     void setProxy(String value);
 
     void setSystemPrompt(String value);
+
+    /** Optional mutation hook for observation mode; default keeps third-party config implementations source-compatible. */
+    default void setObservationMode(String value) {}
+
+    /** Optional mutation hook for automatic Skill learning. */
+    default void setAutoSkillLearningEnabled(boolean value) {}
 
     /** Set the reasoning effort ({@code auto}/{@code low}/{@code medium}/{@code high}). Caller must {@link #save()}. */
     void setReasoningEffort(String value);

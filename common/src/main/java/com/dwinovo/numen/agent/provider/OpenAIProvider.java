@@ -1,5 +1,6 @@
 package com.dwinovo.numen.agent.provider;
 
+import com.dwinovo.numen.agent.llm.VisualObservation;
 import com.dwinovo.numen.agent.tool.NumenTool;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -43,6 +44,31 @@ public class OpenAIProvider implements LlmProvider {
         JsonObject m = new JsonObject();
         m.addProperty("role", "user");
         m.addProperty("content", content == null ? "" : content);
+        return m;
+    }
+
+    @Override
+    public JsonObject buildVisionUserMessage(String content, VisualObservation observation) {
+        if (observation == null || observation.isEmpty()) return buildUserMessage(content);
+
+        JsonObject m = new JsonObject();
+        m.addProperty("role", "user");
+        JsonArray parts = new JsonArray();
+
+        JsonObject text = new JsonObject();
+        text.addProperty("type", "text");
+        text.addProperty("text", content == null ? "" : content);
+        parts.add(text);
+
+        JsonObject imageUrl = new JsonObject();
+        imageUrl.addProperty("url", observation.dataUrl());
+        imageUrl.addProperty("detail", observation.detail());
+        JsonObject image = new JsonObject();
+        image.addProperty("type", "image_url");
+        image.add("image_url", imageUrl);
+        parts.add(image);
+
+        m.add("content", parts);
         return m;
     }
 

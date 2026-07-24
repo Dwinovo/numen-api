@@ -1,5 +1,6 @@
 package com.dwinovo.numen.agent.provider;
 
+import com.dwinovo.numen.agent.llm.VisualObservation;
 import com.dwinovo.numen.agent.tool.NumenTool;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -61,6 +62,14 @@ public interface LlmProvider {
 
     /** Build the user-role wire message for {@code content}. */
     JsonObject buildUserMessage(String content);
+
+    /**
+     * Build a multimodal user message carrying one ephemeral visual observation. Providers that do
+     * not implement image input degrade to the text message instead of corrupting the request.
+     */
+    default JsonObject buildVisionUserMessage(String content, VisualObservation observation) {
+        return buildUserMessage(content);
+    }
 
     /** Build the system-role wire message for {@code content}. */
     JsonObject buildSystemMessage(String content);

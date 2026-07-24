@@ -1,9 +1,10 @@
 {
-  "_comment": "Numen LLM sites (OpenAI-compatible). Per site: base URL + optional custom headers + known models with their context window (tokens, fed into auto-compaction). Model lists refreshed from each provider's own docs (2026-06); ids/context windows are best-effort and may drift — USER-EDITABLE: this is copied to config/numen/models.json on first run; edit that file to add your own sites/models or override URLs. Every model field also accepts a custom id via the settings 'custom' escape hatch.",
+  "_comment": "Numen LLM sites (OpenAI-compatible). Per site: base URL + optional custom headers + known models with their context window (tokens, fed into auto-compaction). Vision is deliberately not modeled here: image input is an explicit user option, never inferred from model ids. Model lists refreshed from each provider's own docs (2026-07); ids/context windows are best-effort and may drift — USER-EDITABLE: this is copied to config/numen/models.json on first run; edit that file to add your own sites/models or override URLs. Every model field also accepts a custom id via the settings 'custom' escape hatch.",
   "providers": [
     {
       "id": "openai", "name": "OpenAI", "baseUrl": "https://api.openai.com/v1",
       "models": [
+        { "id": "gpt-5.6", "ctx": 1000000 },
         { "id": "gpt-5.5", "ctx": 1000000 },
         { "id": "gpt-5.4", "ctx": 1050000 },
         { "id": "gpt-5.4-mini", "ctx": 272000 },
@@ -79,6 +80,7 @@
       },
       "models": [
         { "id": "deepseek/deepseek-v4-pro", "ctx": 1000000 },
+        { "id": "openai/gpt-5.6", "ctx": 1000000 },
         { "id": "openai/gpt-5.5", "ctx": 1000000 },
         { "id": "z-ai/glm-5.2", "ctx": 1000000 },
         { "id": "x-ai/grok-4.3", "ctx": 1000000 },
