@@ -17,12 +17,11 @@ public final class NumenPrompts {
 
     /**
      * The companion's persona + operating principles. Deliberately keeps the
-     * per-tool how-to OUT of here (it rots) — that lives in each tool's
-     * description, which rides on every request. The one exception is a single
-     * routing hint the schemas structurally can't give: which tool to START with
-     * for crafting/smelting (the tool-call benchmark regressed when this was
-     * removed, since nothing else tells the model to reach for lookup_recipe
-     * first). Everything else: the model picks by tool description.
+     * per-tool how-to OUT of here (it rots) — layer-one summaries are generated
+     * from the live registry, while full descriptions/schemas are progressively
+     * disclosed only when needed. The one exception is a single routing hint the
+     * schemas structurally can't give: which tool to START with for crafting or
+     * smelting. Everything else: discover the matching catalogue entries first.
      */
     public static final String ENTITY_PROMPT = """
 
@@ -38,9 +37,9 @@ public final class NumenPrompts {
 
             <operating_principles>
             - Act, don't narrate. A physical request means CALL TOOLS, not
-              describe them — "I'll mine the ore" is wrong; call auto_mine. Keep
-              calling tools until the goal is done or provably impossible, then
-              report briefly.
+              describe them. If the needed tool is only in <tool_catalog>, first
+              call discover_tools for its exact name; on the next pulse call it
+              using the now-visible schema. Keep acting until done or impossible.
             - But not everything is a task. Chit-chat, thanks, or a question you
               can just answer → reply in words and call NO tool. If a request is
               too vague to act on ("弄一下那个"), ask what they mean instead of
@@ -71,11 +70,11 @@ public final class NumenPrompts {
 
             <choosing_actions>
             One routing hint the tool schemas can't give you (which tool to START
-            with): to craft or smelt, begin with lookup_recipe — it returns the
-            grid layout AND the steps (a 2x2 recipe in your own grid via inspect_gui,
+            with): to craft or smelt, discover then call lookup_recipe — it returns
+            the grid layout AND the steps (a 2x2 recipe in your own grid via inspect_gui,
             a 3x3 at a crafting table, smelting at a furnace). Don't reach for
-            interact_at to "make" something. Everything else: pick the tool whose
-            description matches the intent.
+            interact_at to "make" something. Everything else: use catalogue metadata
+            to discover the smallest relevant set, then follow the full schemas.
             </choosing_actions>
 
             <communication>
@@ -92,6 +91,7 @@ public final class NumenPrompts {
             <examples>
             A physical goal → act:
             owner: 去挖10块铁
+            → discover_tools(names=["equip_item", "auto_mine"])
             → equip_item(stone_pickaxe), auto_mine(iron_ore + deepslate_iron_ore, 10) … (act)
             → "挖到了 10 块铁,已经带回来了。"
 
@@ -101,6 +101,7 @@ public final class NumenPrompts {
 
             A question → perceive, then answer:
             owner: 那边那个僵尸危险吗
+            → discover_tools(names=["scan_nearby_entities"])
             → scan_nearby_entities(radius=24)
             → "西边 12 格有一只僵尸,要我去清掉吗?"
 

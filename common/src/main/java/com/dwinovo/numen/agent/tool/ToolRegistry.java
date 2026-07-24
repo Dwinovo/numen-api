@@ -81,8 +81,9 @@ public final class ToolRegistry {
     }
 
     /**
-     * All registered tools, in registration order. Fed to each LLM call.
-     * A copy, so callers can pass it to APIs expecting a mutable {@link List}.
+     * All registered tools, in registration order. Progressive disclosure uses
+     * this live set to build layer-one metadata, then selects a bounded subset of
+     * full schemas for each LLM call. A copy, so callers may safely filter it.
      */
     public static List<NumenTool> all() {
         return new ArrayList<>(TOOLS.values());

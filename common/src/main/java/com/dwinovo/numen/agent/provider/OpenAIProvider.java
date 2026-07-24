@@ -117,7 +117,9 @@ public class OpenAIProvider implements LlmProvider {
 
         if (tools != null && !tools.isEmpty()) {
             body.add("tools", tools);
-            body.addProperty("parallel_tool_calls", true);
+            // One body executes serially, and progressive disclosure requires a
+            // discovery result before a newly revealed schema can be used.
+            body.addProperty("parallel_tool_calls", false);
         }
         return body;
     }

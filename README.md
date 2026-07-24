@@ -28,6 +28,7 @@
 
 - **客户端对话回路**（`EntityAgentLoop`）——听一句话 → 选一个工具 → 干活 → 看结果 → 决定下一步。这条回路跑在**玩家自己的游戏客户端**上，用**玩家自己的 API key**。
 - **工具契约**——`NumenTool` / `ToolRegistry` / `ToolCall` / `TaskResult`。工具就是同伴能调用的一种能力；引擎负责调度它，并把结果送回对话。
+- **渐进式工具披露**——首轮只提供工具名称与一句简介；模型按需调用 `discover_tools` 后，完整说明和参数 schema 才进入后续请求，并以 LRU 与闲置期限自动收敛工具面。
 - **兼容 OpenAI 接口的模型接入**——DeepSeek、DashScope（通义千问）、OpenAI、Moonshot（Kimi）、Zhipu（GLM）、Minimax、SiliconFlow、Volcengine（豆包）。传输层用 JDK 自带的 `HttpClient` + Gson 手搓，**不带任何第三方运行时依赖**。
 - **对话记忆**——跨存档持久化，聊长了自动摘要压缩（Claude Code 式的压缩策略）。
 - **同伴身体**——`NumenPlayer`，一个服务端的"真玩家"（`ServerPlayer`）。每个动作都走原版玩家的代码路径，所以红石、怪物、容器、别人的 mod 天生都拿它当真玩家对待。
@@ -107,6 +108,8 @@ ToolRegistry.register(new SendQqMessageTool());
 ```
 
 `invoke` 通过唯一的动词 `ToolCall.complete(json)` 报告结果——同步报告，或把活儿交给别的线程/服务端身体之后再报告。`ToolRegistry.register` 遇到重名会抛异常，并保留注册顺序（稳定的工具顺序有利于提示词缓存）。
+
+内置大脑采用渐进式工具披露：第一层只把每个已注册工具的名称和一句简介放进目录；模型用 `discover_tools` 选择后，完整 `description` 与参数 schema 才进入下一次请求，闲置后自动收回。`NumenTool.summary()` 默认从 `description()` 的首句生成；工具作者可以覆写它，提供更精准、但不包含参数细节的目录名片。`NumenActuator.invoke` 等外部直接调用不受披露层限制。
 
 ### 哪些是稳定的
 

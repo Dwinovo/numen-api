@@ -28,6 +28,7 @@ What the engine provides:
 
 - **A client-side agent loop** (`EntityAgentLoop`) — hears a message, picks a tool, runs it, reads the result, decides the next move. The brain runs on the owner's own game client with the owner's own API key.
 - **A tool contract** — `NumenTool` / `ToolRegistry` / `ToolCall` / `TaskResult`. A tool is any capability the companion can call; the engine schedules it and routes the result back into the conversation.
+- **Progressive tool disclosure** — the first pulse carries only names and one-line summaries; after the model selects entries through `discover_tools`, full descriptions and parameter schemas enter subsequent requests, with LRU and idle expiry converging the active surface.
 - **OpenAI-compatible LLM providers** — DeepSeek, DashScope (Qwen), OpenAI, Moonshot (Kimi), Zhipu (GLM), Minimax, SiliconFlow, Volcengine (Doubao). Transport is hand-rolled on the JDK's `HttpClient` + Gson, so there are **zero third-party runtime dependencies**.
 - **Conversation memory** — persists across saves and auto-compacts (Claude-Code-style) when it grows long.
 - **A companion body** — `NumenPlayer`, a server-side fake player (`ServerPlayer`). Every action runs through native player code paths, so redstone, mob AI, containers, and other mods treat it as a real player.
@@ -107,6 +108,8 @@ ToolRegistry.register(new SendQqMessageTool());
 ```
 
 `invoke` reports its result through the one verb, `ToolCall.complete(json)` — synchronously, or later after handing work off to another thread or the server body. `ToolRegistry.register` throws on a duplicate name and preserves registration order (stable tool order helps prompt caching).
+
+The built-in brain uses progressive tool disclosure: layer one lists only each registered tool's name and one-line summary; after the model selects names with `discover_tools`, their complete `description` and parameter schemas enter the next request and expire after inactivity. `NumenTool.summary()` derives a bounded first sentence from `description()` by default; tool authors may override it with a sharper catalogue card that contains no parameter details. Direct external calls such as `NumenActuator.invoke` are not restricted by this disclosure layer.
 
 ### What is stable
 
