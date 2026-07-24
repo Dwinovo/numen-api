@@ -45,6 +45,16 @@ public final class NumenPlayer extends ServerPlayer {
         super(server, level, profile, clientInformation);
     }
 
+    /**
+     * 点亮全部皮肤覆盖层(帽子/夹克/左右袖/左右裤腿)与披风。假玩家没有客户端上报的
+     * 模型定制,不设这个字节客户端只渲染单层基础皮肤。该字节是同步实体数据、不随 .dat
+     * 存取,故每次进世界都要重设一次(经 {@code protected} 的 DATA_PLAYER_MODE_CUSTOMISATION
+     * 访问,子类内可见)。
+     */
+    public void showAllSkinLayers() {
+        getEntityData().set(DATA_PLAYER_MODE_CUSTOMISATION, (byte) 0x7f);
+    }
+
     /** The loaded companion body with this UUID, or {@code null} if not spawned. */
     public static NumenPlayer findByUuid(MinecraftServer server, UUID uuid) {
         return server.getPlayerList().getPlayer(uuid) instanceof NumenPlayer ap ? ap : null;
@@ -101,7 +111,7 @@ public final class NumenPlayer extends ServerPlayer {
         inv.setItem(slot, held);
     }
 
-    // ---- server tick (Carpet's EntityPlayerMPFake trick) ----
+    // ---- server tick (restore the movement pass a fake connection skips) ----
 
     /**
      * Drive the body's own movement physics. A real {@link ServerPlayer} runs
@@ -111,8 +121,8 @@ public final class NumenPlayer extends ServerPlayer {
      * {@code doTick()} never fires and the body would only ever turn (a direct
      * {@code setYRot} write) without walking. The entity system already calls
      * {@code super.tick()} (menus / container / position sync), so we add the
-     * missing {@code doTick()} movement pass here — exactly as Carpet's
-     * {@code EntityPlayerMPFake.tick()} does. Every 10 ticks we resync the
+     * missing {@code doTick()} movement pass here in our own {@code tick()}
+     * override. Every 10 ticks we resync the
      * connection position and let chunk loading follow the body so it never
      * walks out of its loaded area.
      */
@@ -134,7 +144,8 @@ public final class NumenPlayer extends ServerPlayer {
         try {
             this.doTick();
         } catch (Exception ignored) {
-            // mirrors Carpet — fake-connection internals can NPE on edge cases
+            // fake-connection internals can NPE on edge cases; a swallowed tick
+            // beats crashing the server for a cosmetic pass
         }
     }
 
