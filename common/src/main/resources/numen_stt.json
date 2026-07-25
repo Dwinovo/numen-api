@@ -2,6 +2,13 @@
   "_comment": "Numen STT (voice-input) providers. OpenAI-compatible POST {base}/v1/audio/transcriptions (multipart file+model) unless 'backend' says otherwise. Per provider: base URL + known model ids. Model lists refreshed from each provider's docs (2026-07); best-effort, may drift. USER-EDITABLE: this is copied to config/numen/stt.json on first run; edit that file to add your own providers/models or override URLs. The settings 'custom' model escape hatch also accepts any id.",
   "providers": [
     {
+      "id": "aliyun-bailian",
+      "name": "阿里云百炼 Fun-ASR（实时）",
+      "backend": "dashscope-realtime",
+      "baseUrl": "wss://dashscope.aliyuncs.com/api-ws/v1/inference/",
+      "models": ["fun-asr-realtime", "fun-asr-realtime-2026-02-28", "fun-asr-realtime-2025-11-07"]
+    },
+    {
       "id": "siliconflow",
       "name": "SiliconFlow (硅基流动)",
       "backend": "whisper-http",

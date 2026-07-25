@@ -19,10 +19,17 @@ public final class NumenKeys {
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G,
             "key.categories.misc");
 
+    /** V — hold to record; release to transcribe and submit directly to the selected companion. */
+    public static final KeyMapping PUSH_TO_TALK = new KeyMapping(
+            com.dwinovo.numen.data.ModLanguageData.Keys.KEY_PUSH_TO_TALK,
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V,
+            "key.categories.misc");
+
     private NumenKeys() {}
 
     /** Per-client-tick poll; key presses only register while no screen is open. */
     public static void tick() {
+        com.dwinovo.numen.client.stt.GlobalPushToTalk.tick(PUSH_TO_TALK.isDown());
         while (OPEN_ROSTER.consumeClick()) {
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null && mc.screen == null) {

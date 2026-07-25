@@ -836,6 +836,8 @@ public final class SettingsView {
                         I18n.get(ModLanguageData.Keys.VOICE_BACKEND_OPENAI)),
                 new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS,
                         I18n.get(ModLanguageData.Keys.VOICE_BACKEND_SOVITS)),
+                new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO,
+                        I18n.get(ModLanguageData.Keys.VOICE_BACKEND_DOUBAO)),
                 new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX,
                         I18n.get(ModLanguageData.Keys.VOICE_BACKEND_MINIMAX)),
                 new Dropdown.Item(com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH,
@@ -852,6 +854,12 @@ public final class SettingsView {
                 voiceLangInput = vclip(field(x, voiceVy(row), w, 16, wVoiceLang), row++);
             }
             case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX -> {
+                voiceKeyInput = vclip(field(x, voiceVy(row), w, 1024, wVoiceKey), row++);
+                voiceGroupInput = vclip(field(x, voiceVy(row), w, 64, wVoiceGroup), row++);
+                voiceModelInput = vclip(field(x, voiceVy(row), w, 64, wVoiceModel), row++);
+                voiceVoiceInput = vclip(field(x, voiceVy(row), w, 128, wVoiceVoice), row++);
+            }
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO -> {
                 voiceKeyInput = vclip(field(x, voiceVy(row), w, 1024, wVoiceKey), row++);
                 voiceGroupInput = vclip(field(x, voiceVy(row), w, 64, wVoiceGroup), row++);
                 voiceModelInput = vclip(field(x, voiceVy(row), w, 64, wVoiceModel), row++);
@@ -904,7 +912,9 @@ public final class SettingsView {
 
     /** 当前选型的总行数:名称/提供商/URL 三行 + 各后端专属行 + 音量行。 */
     private int voiceFormRowCount() {
-        return com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX.equals(wVoiceBackend) ? 8 : 7;
+        return com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX.equals(wVoiceBackend)
+                || com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO.equals(wVoiceBackend)
+                ? 8 : 7;
     }
 
     private int maxVoiceFormScroll() {
@@ -960,6 +970,8 @@ public final class SettingsView {
                     com.dwinovo.numen.client.voice.GptSovitsTts.DEFAULT_BASE;
             case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX ->
                     com.dwinovo.numen.client.voice.MiniMaxTts.DEFAULT_BASE;
+            case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO ->
+                    com.dwinovo.numen.client.voice.DoubaoTtsV3.DEFAULT_BASE;
             case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH ->
                     com.dwinovo.numen.client.voice.FishAudioTts.DEFAULT_BASE;
             default -> com.dwinovo.numen.client.voice.OpenAiCompatibleTts.DEFAULT_BASE;
@@ -1123,7 +1135,7 @@ public final class SettingsView {
             txt(g, Component.literal(e.name()), tx, ry + 1, TXT);
             String detail;
             if (e.isSovits()) detail = nb(e.refAudio()) ? e.refAudio() : "?";
-            else if (e.isMiniMax()) detail = nb(e.voice()) ? e.voice() : "?";
+            else if (e.isMiniMax() || e.isDoubao()) detail = nb(e.voice()) ? e.voice() : "?";
             else if (e.isFishAudio()) detail = nb(e.voice()) ? e.voice() : "?";
             else detail = nb(e.model()) ? e.model() : "?";
             String meta = (nb(e.backend()) ? e.backend() : "openai") + " · " + detail
@@ -1192,6 +1204,7 @@ public final class SettingsView {
         String b = backend == null ? "" : backend.toLowerCase(java.util.Locale.ROOT).strip();
         return switch (b) {
             case com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS,
+                 com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO,
                  com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX,
                  com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH -> b;
             default -> com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_OPENAI;
@@ -2367,6 +2380,7 @@ public final class SettingsView {
         if (section == Section.VOICE && addingVoice) {
             boolean fish = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_FISH.equals(wVoiceBackend);
             boolean minimax = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_MINIMAX.equals(wVoiceBackend);
+            boolean doubao = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_DOUBAO.equals(wVoiceBackend);
             boolean sovits = com.dwinovo.numen.client.voice.VoiceLibrary.BACKEND_SOVITS.equals(wVoiceBackend);
             voiceLabel(g, 0, I18n.get(ModLanguageData.Keys.VOICE_FORM_NAME));
             voiceLabel(g, 1, I18n.get(ModLanguageData.Keys.PROVIDER_FORM_PROVIDER));
@@ -2380,11 +2394,19 @@ public final class SettingsView {
                 voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_LANG));
                 placeholder(g, voiceLangInput, "zh");
             } else {
-                voiceLabel(g, row++, I18n.get(fish ? ModLanguageData.Keys.VOICE_FORM_KEY_FISH
+                voiceLabel(g, row++, I18n.get(doubao ? ModLanguageData.Keys.VOICE_FORM_KEY_DOUBAO
+                        : fish ? ModLanguageData.Keys.VOICE_FORM_KEY_FISH
                         : minimax ? ModLanguageData.Keys.VOICE_FORM_KEY_MINIMAX
                         : ModLanguageData.Keys.VOICE_FORM_KEY_OPENAI));
-                placeholder(g, voiceKeyInput, minimax ? "eyJ…" : "sk-…");
-                if (minimax) {
+                placeholder(g, voiceKeyInput, minimax ? "eyJ…" : doubao ? "API / Access Key" : "sk-…");
+                if (doubao) {
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_DOUBAO_APP));
+                    placeholder(g, voiceGroupInput, "App ID（新版可留空）");
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_DOUBAO_RESOURCE));
+                    placeholder(g, voiceModelInput, "seed-tts-2.0");
+                    voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_DOUBAO_SPEAKER));
+                    placeholder(g, voiceVoiceInput, "zh_female_vv_uranus_bigtts");
+                } else if (minimax) {
                     voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_GROUP));
                     voiceLabel(g, row++, I18n.get(ModLanguageData.Keys.VOICE_FORM_MINIMAX_MODEL));
                     placeholder(g, voiceModelInput, "speech-02-turbo");

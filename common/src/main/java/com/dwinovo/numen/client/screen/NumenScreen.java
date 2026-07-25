@@ -209,6 +209,7 @@ public final class NumenScreen extends Screen {
         super(Component.literal(name == null ? "Numen" : "Numen - " + name));
         this.uuid = uuid;
         this.name = name;
+        com.dwinovo.numen.client.stt.GlobalPushToTalk.rememberCompanion(uuid);
     }
 
     /** Open the panel focused on a specific companion. */
@@ -229,6 +230,7 @@ public final class NumenScreen extends Screen {
         if (java.util.Objects.equals(u, uuid)) return;
         input = null; savedInput = "";          // don't carry typed text across companions
         uuid = u; name = n;
+        com.dwinovo.numen.client.stt.GlobalPushToTalk.rememberCompanion(u);
         chatView.reset();
         rebuild();
         if (tab == Tab.ITEMS && u != null) requestInventory();

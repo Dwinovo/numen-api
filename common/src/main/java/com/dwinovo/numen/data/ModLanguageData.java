@@ -43,6 +43,8 @@ public final class ModLanguageData {
 
         /** Hotkey: open the companion roster panel (shown in Controls settings). */
         public static final String KEY_OPEN_ROSTER = "key.numen.open_roster";
+        /** Hotkey: hold to talk directly to the selected companion. */
+        public static final String KEY_PUSH_TO_TALK = "key.numen.push_to_talk";
 
         // Model-config (provider library) section: nav label, list, form.
         public static final String PROVIDER_TITLE          = "numen.provider.title";
@@ -105,15 +107,20 @@ public final class ModLanguageData {
         public static final String VOICE_FORM_NAME      = "numen.voice.form_name";
         public static final String VOICE_BACKEND_OPENAI  = "numen.voice.backend_openai";
         public static final String VOICE_BACKEND_SOVITS  = "numen.voice.backend_sovits";
+        public static final String VOICE_BACKEND_DOUBAO  = "numen.voice.backend_doubao";
         public static final String VOICE_BACKEND_MINIMAX = "numen.voice.backend_minimax";
         public static final String VOICE_BACKEND_FISH    = "numen.voice.backend_fish";
         public static final String VOICE_FORM_URL       = "numen.voice.form_url";
         public static final String VOICE_FORM_KEY_OPENAI  = "numen.voice.form_key_openai";
+        public static final String VOICE_FORM_KEY_DOUBAO   = "numen.voice.form_key_doubao";
         public static final String VOICE_FORM_KEY_MINIMAX = "numen.voice.form_key_minimax";
         public static final String VOICE_FORM_KEY_FISH    = "numen.voice.form_key_fish";
         public static final String VOICE_FORM_MINIMAX_MODEL = "numen.voice.form_minimax_model";
         public static final String VOICE_FORM_MINIMAX_VOICE = "numen.voice.form_minimax_voice";
         public static final String VOICE_FORM_GROUP     = "numen.voice.form_group";
+        public static final String VOICE_FORM_DOUBAO_APP = "numen.voice.form_doubao_app";
+        public static final String VOICE_FORM_DOUBAO_RESOURCE = "numen.voice.form_doubao_resource";
+        public static final String VOICE_FORM_DOUBAO_SPEAKER = "numen.voice.form_doubao_speaker";
         public static final String VOICE_FORM_REFERENCE = "numen.voice.form_reference";
         public static final String VOICE_FORM_FISH_MODEL = "numen.voice.form_fish_model";
         public static final String VOICE_FORM_MODEL     = "numen.voice.form_model";
@@ -163,6 +170,7 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_SAVED,         "Saved");
 
         adder.add(Keys.KEY_OPEN_ROSTER, "Open Companion Roster");
+        adder.add(Keys.KEY_PUSH_TO_TALK, "Hold to Talk to Companion");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---
         adder.add("numen.tab.chat", "Chat");
@@ -367,15 +375,20 @@ public final class ModLanguageData {
         adder.add(Keys.VOICE_FORM_NAME,      "Name (required)");
         adder.add(Keys.VOICE_BACKEND_OPENAI,  "OpenAI-compatible");
         adder.add(Keys.VOICE_BACKEND_SOVITS,  "GPT-SoVITS");
+        adder.add(Keys.VOICE_BACKEND_DOUBAO,  "Doubao TTS 2.0 (v3)");
         adder.add(Keys.VOICE_BACKEND_MINIMAX, "MiniMax");
         adder.add(Keys.VOICE_BACKEND_FISH,    "Fish Audio");
         adder.add(Keys.VOICE_FORM_URL,       "Service URL (prefilled per provider, editable)");
         adder.add(Keys.VOICE_FORM_KEY_OPENAI,  "API Key (create in your provider's console)");
+        adder.add(Keys.VOICE_FORM_KEY_DOUBAO,   "API Key / Access Key (Volcengine Voice console)");
         adder.add(Keys.VOICE_FORM_KEY_MINIMAX, "API Key (MiniMax console > Account > API keys)");
         adder.add(Keys.VOICE_FORM_KEY_FISH,    "API Key (fish.audio > API credentials)");
         adder.add(Keys.VOICE_FORM_MINIMAX_MODEL, "Model (blank = speech-02-turbo)");
         adder.add(Keys.VOICE_FORM_MINIMAX_VOICE, "voice_id (copy from the Voices library)");
         adder.add(Keys.VOICE_FORM_GROUP,     "GroupId (fill if API errors ask for it)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_APP, "App ID (legacy console only; blank for new API Key)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_RESOURCE, "Resource ID (blank = seed-tts-2.0)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_SPEAKER, "Speaker ID (for example zh_female_vv_uranus_bigtts)");
         adder.add(Keys.VOICE_FORM_REFERENCE, "Voice reference_id (paste the voice page URL or ID; blank = account default)");
         adder.add(Keys.VOICE_FORM_FISH_MODEL, "Synthesis model (blank = default; s2.1-pro-free = free tier)");
         adder.add(Keys.VOICE_FORM_MODEL,     "TTS model id");
@@ -407,6 +420,7 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_SAVED,         "已保存");
 
         adder.add(Keys.KEY_OPEN_ROSTER, "打开同伴名册");
+        adder.add(Keys.KEY_PUSH_TO_TALK, "按住与同伴说话");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---
         adder.add("numen.tab.chat", "对话");
@@ -608,15 +622,20 @@ public final class ModLanguageData {
         adder.add(Keys.VOICE_FORM_NAME,      "名称(必填)");
         adder.add(Keys.VOICE_BACKEND_OPENAI,  "OpenAI 兼容");
         adder.add(Keys.VOICE_BACKEND_SOVITS,  "GPT-SoVITS");
+        adder.add(Keys.VOICE_BACKEND_DOUBAO,  "豆包 TTS 2.0（v3）");
         adder.add(Keys.VOICE_BACKEND_MINIMAX, "MiniMax");
         adder.add(Keys.VOICE_BACKEND_FISH,    "Fish Audio");
         adder.add(Keys.VOICE_FORM_URL,       "服务地址(随提供商预填,可改)");
         adder.add(Keys.VOICE_FORM_KEY_OPENAI,  "API Key(服务商控制台创建)");
+        adder.add(Keys.VOICE_FORM_KEY_DOUBAO,   "API Key / Access Key(火山引擎豆包语音控制台)");
         adder.add(Keys.VOICE_FORM_KEY_MINIMAX, "API Key(MiniMax 平台>账户管理>接口密钥)");
         adder.add(Keys.VOICE_FORM_KEY_FISH,    "API Key(fish.audio>API 凭证页创建)");
         adder.add(Keys.VOICE_FORM_MINIMAX_MODEL, "模型(留空即 speech-02-turbo)");
         adder.add(Keys.VOICE_FORM_MINIMAX_VOICE, "voice_id(平台音色库复制)");
         adder.add(Keys.VOICE_FORM_GROUP,     "GroupId(接口报错要求时必填)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_APP, "App ID(仅旧版控制台需要;新版 API Key 留空)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_RESOURCE, "资源 ID(留空即 seed-tts-2.0)");
+        adder.add(Keys.VOICE_FORM_DOUBAO_SPEAKER, "音色 Speaker ID(例如 zh_female_vv_uranus_bigtts)");
         adder.add(Keys.VOICE_FORM_REFERENCE, "声线 reference_id(可直接粘贴声线页网址;留空用账号默认)");
         adder.add(Keys.VOICE_FORM_FISH_MODEL, "合成模型(留空用默认;s2.1-pro-free 为免费档)");
         adder.add(Keys.VOICE_FORM_MODEL,     "TTS 模型 id");

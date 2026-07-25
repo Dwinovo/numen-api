@@ -85,6 +85,23 @@ class VoiceLibraryTest {
     }
 
     @Test
+    void doubaoFieldsRoundTripAndCreateV3Backend() {
+        VoiceLibrary lib = fresh();
+        VoiceLibrary.Entry created = lib.create(
+                "豆包 Vivi 2.0", VoiceLibrary.BACKEND_DOUBAO,
+                DoubaoTtsV3.DEFAULT_BASE, "access-key", "app-id",
+                "seed-tts-2.0", "zh_female_vv_uranus_bigtts",
+                "", "", "", 1.0f);
+
+        VoiceLibrary.Entry loaded = fresh().get(created.id());
+        assertTrue(loaded.isDoubao());
+        assertEquals("app-id", loaded.groupId());
+        assertEquals("seed-tts-2.0", loaded.model());
+        assertEquals("zh_female_vv_uranus_bigtts", loaded.voice());
+        assertTrue(loaded.createBackend() instanceof DoubaoTtsV3);
+    }
+
+    @Test
     void updateReplacesInPlace() {
         VoiceLibrary lib = fresh();
         VoiceLibrary.Entry e = openai(lib, "旧名");

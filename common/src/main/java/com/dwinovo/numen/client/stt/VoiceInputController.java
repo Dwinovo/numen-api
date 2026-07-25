@@ -31,26 +31,43 @@ public final class VoiceInputController {
      */
     public static synchronized void toggle(INumenConfig cfg, Consumer<String> onText, Consumer<String> onStatus) {
         if (isActive()) {
-            MicrophoneManager.stop();   // 采集线程收尾时回调 session.finish()
-            active = false;
+            stop();
             return;
+        }
+        start(cfg, onText, onText, onStatus);
+    }
+
+    /**
+     * 开始一次语音输入。流式临时文字只给 {@code onPartial}，服务端正式收尾后只调用一次
+     * {@code onFinal}。全局 PTT 由此把最终文本直接送给伙伴，而聊天面板仍可把两者都刷进输入框。
+     *
+     * @return true 表示麦克风已经开始采集；false 表示已有会话或配置/设备不可用
+     */
+    public static synchronized boolean start(INumenConfig cfg,
+                                             Consumer<String> onPartial,
+                                             Consumer<String> onFinal,
+                                             Consumer<String> onStatus) {
+        if (isActive()) {
+            return false;
         }
         SttBackend backend = SttProviders.fromConfig(cfg);
         if (backend == null) {
             onStatus.accept(I18n.get(ModLanguageData.Keys.STT_NOT_CONFIGURED));
-            return;
+            return false;
         }
+        active = true;
         SttSession s = backend.open(new SttListener() {
             @Override
             public void onPartial(String text) {
-                onMain(() -> onText.accept(text));
+                onMain(() -> onPartial.accept(text));
             }
 
             @Override
             public void onFinal(String text) {
                 onMain(() -> {
-                    onText.accept(text);
+                    onFinal.accept(text);
                     active = false;
+                    session = null;
                 });
             }
 
@@ -59,18 +76,42 @@ public final class VoiceInputController {
                 onMain(() -> {
                     onStatus.accept(I18n.get(ModLanguageData.Keys.STT_FAILED, rootMessage(error)));
                     active = false;
+                    session = null;
                 });
             }
         });
+        if (!active) {
+            s.cancel();
+            return false;
+        }
         session = s;
         boolean started = MicrophoneManager.start(cfg.getSttMicrophone(), s::feed, s::finish);
         if (!started) {
             s.cancel();
+            session = null;
             active = false;
             onStatus.accept(I18n.get(ModLanguageData.Keys.STT_NO_MIC));
-            return;
+            return false;
         }
-        active = true;
+        return true;
+    }
+
+    /** 松开 PTT / 再点麦克风：停止采集，但保持会话到云端返回最终结果。 */
+    public static synchronized void stop() {
+        if (MicrophoneManager.isRecording()) {
+            MicrophoneManager.stop();
+        }
+    }
+
+    /** 退出世界等场景的硬取消：不提交识别结果。 */
+    public static synchronized void cancel() {
+        MicrophoneManager.stop();
+        SttSession current = session;
+        session = null;
+        active = false;
+        if (current != null) {
+            current.cancel();
+        }
     }
 
     private static void onMain(Runnable r) {

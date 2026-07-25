@@ -63,6 +63,7 @@ public class NumenNeoForgeClient {
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
         // G → companion roster panel (chat entry + settings/reset live in there).
         event.register(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        event.register(com.dwinovo.numen.client.NumenKeys.PUSH_TO_TALK);
     }
 
     static void onClientTick(net.neoforged.neoforge.client.event.ClientTickEvent.Post event) {
@@ -77,6 +78,7 @@ public class NumenNeoForgeClient {
         com.dwinovo.numen.client.hud.NumenToasts.clear();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
         com.dwinovo.numen.client.debug.PathDebugState.clear();
+        com.dwinovo.numen.client.stt.GlobalPushToTalk.reset();
     }
 
     static void registerGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {

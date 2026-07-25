@@ -44,7 +44,8 @@ import java.util.UUID;
  *
  * <ul>
  *   <li>{@code backend} — {@code "openai"}(OpenAI /v1/audio/speech 协议,含硅基流动等)、
- *       {@code "gpt_sovits"}(api_v2 的 /tts)、{@code "minimax"}(t2a_v2,字段:
+ *       {@code "gpt_sovits"}(api_v2 的 /tts)、{@code "doubao_v3"}(豆包 Seed TTS 2.0)、
+ *       {@code "minimax"}(t2a_v2,字段:
  *       url/api_key/group_id 可选/model/voice=voice_id)或 {@code "fish_audio"}
  *       (v1/tts,字段:url/api_key/voice=reference_id/model=可选模型头);</li>
  *   <li>{@code volume} — 0.0–2.0,缺省 1.0(&gt;1 扩大可听半径,响度上限仍是 1)。</li>
@@ -52,9 +53,10 @@ import java.util.UUID;
  */
 public final class VoiceLibrary {
 
-    /** 四种后端的标识串(存储与表单下拉共用)。未知值按 openai 兜底。 */
+    /** 五种后端的标识串(存储与表单下拉共用)。未知值按 openai 兜底。 */
     public static final String BACKEND_OPENAI = "openai";
     public static final String BACKEND_SOVITS = "gpt_sovits";
+    public static final String BACKEND_DOUBAO = "doubao_v3";
     public static final String BACKEND_MINIMAX = "minimax";
     public static final String BACKEND_FISH = "fish_audio";
 
@@ -76,6 +78,10 @@ public final class VoiceLibrary {
             return BACKEND_MINIMAX.equalsIgnoreCase(backend);
         }
 
+        public boolean isDoubao() {
+            return BACKEND_DOUBAO.equalsIgnoreCase(backend);
+        }
+
         public boolean isFishAudio() {
             return BACKEND_FISH.equalsIgnoreCase(backend);
         }
@@ -87,6 +93,9 @@ public final class VoiceLibrary {
             }
             if (isMiniMax()) {
                 return new MiniMaxTts(url, apiKey, groupId, model, voice);
+            }
+            if (isDoubao()) {
+                return new DoubaoTtsV3(url, apiKey, groupId, model, voice);
             }
             if (isFishAudio()) {
                 return new FishAudioTts(url, apiKey, voice, model);

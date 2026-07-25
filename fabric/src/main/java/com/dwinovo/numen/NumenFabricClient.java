@@ -70,6 +70,7 @@ public class NumenFabricClient implements ClientModInitializer {
 
         // G → companion roster panel (chat entry + settings/reset live in there).
         KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.PUSH_TO_TALK);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
                 .register(client -> {
                     com.dwinovo.numen.client.NumenKeys.tick();
@@ -89,6 +90,7 @@ public class NumenFabricClient implements ClientModInitializer {
                     com.dwinovo.numen.client.hud.NumenToasts.clear();
                     com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
                     com.dwinovo.numen.client.debug.PathDebugState.clear();
+                    com.dwinovo.numen.client.stt.GlobalPushToTalk.reset();
                 });
 
         // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。

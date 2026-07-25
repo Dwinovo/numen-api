@@ -25,6 +25,7 @@ import java.util.List;
 public final class SttProviders {
 
     public static final String BACKEND_WHISPER_HTTP = "whisper-http";
+    public static final String BACKEND_DASHSCOPE_REALTIME = "dashscope-realtime";
 
     public record Option(String id, String displayName, String backend,
                          String defaultBaseUrl, List<String> models) {
@@ -79,6 +80,7 @@ public final class SttProviders {
         }
         return switch (opt.backend()) {
             case BACKEND_WHISPER_HTTP -> new WhisperHttpStt(base, key, model);
+            case BACKEND_DASHSCOPE_REALTIME -> new DashScopeRealtimeStt(base, key, model);
             default -> new WhisperHttpStt(base, key, model);
         };
     }
