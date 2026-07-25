@@ -3,6 +3,7 @@ package com.dwinovo.numen.client;
 import com.dwinovo.numen.client.screen.NumenScreen;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.glfw.GLFW;
 
@@ -13,6 +14,10 @@ import org.lwjgl.glfw.GLFW;
  */
 public final class NumenKeys {
 
+    /** Dedicated Controls category so the binding is easy to find and rebind (Options -> Controls -> Numen). */
+    public static final KeyMapping.Category CATEGORY =
+            KeyMapping.Category.register(ResourceLocation.fromNamespaceAndPath("numen_api", "companions"));
+
     /**
      * N — open the companion roster panel (or straight into chat with a single pet).
      * 1.21.6+ vanilla binds Quick Actions to G by default, and vanilla's key lookup
@@ -22,7 +27,7 @@ public final class NumenKeys {
     public static final KeyMapping OPEN_ROSTER = new KeyMapping(
             com.dwinovo.numen.data.ModLanguageData.Keys.KEY_OPEN_ROSTER,
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_N,
-            KeyMapping.Category.MISC);
+            CATEGORY);
 
     private NumenKeys() {}
 
