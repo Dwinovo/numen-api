@@ -13,6 +13,9 @@ import org.lwjgl.glfw.GLFW;
  */
 public final class NumenKeys {
 
+    /** Dedicated vanilla Controls category so the binding is easy to find and rebind (Options → Controls → Numen). */
+    public static final String CATEGORY = com.dwinovo.numen.data.ModLanguageData.Keys.KEY_CATEGORY_NUMEN;
+
     /**
      * N — open the companion roster panel (or straight into chat with a single pet).
      * 1.21.6+ vanilla binds Quick Actions to G by default, and vanilla's key lookup
@@ -22,7 +25,7 @@ public final class NumenKeys {
     public static final KeyMapping OPEN_ROSTER = new KeyMapping(
             com.dwinovo.numen.data.ModLanguageData.Keys.KEY_OPEN_ROSTER,
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_N,
-            "key.categories.misc");
+            CATEGORY);
 
     private NumenKeys() {}
 
