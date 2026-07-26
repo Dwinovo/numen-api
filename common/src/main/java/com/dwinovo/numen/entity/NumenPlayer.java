@@ -60,6 +60,11 @@ public final class NumenPlayer extends ServerPlayer {
         return server.getPlayerList().getPlayer(uuid) instanceof NumenPlayer ap ? ap : null;
     }
 
+    /** Whether this UUID still names a persistent companion, including a dormant or dead one. */
+    public static boolean isRegistered(MinecraftServer server, UUID uuid) {
+        return CompanionRegistry.get(server).find(uuid) != null;
+    }
+
     public UUID getOwnerUuid() {
         return ownerUuid;
     }

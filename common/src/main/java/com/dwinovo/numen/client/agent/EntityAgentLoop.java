@@ -749,11 +749,20 @@ public final class EntityAgentLoop {
      *       (呛水、被袭、任务收尾都可能要改链),模型有权当场重新决策;</li>
      *   <li><b>完全空闲</b>:进箱躺着,等下一个轮子搭车——僵尸击杀只是日记素材,
      *       不值得单独吵主人。只有 {@code principal}(活人在说话:外部桥接的
-     *       弹幕/QQ 消息)例外,享受与主人同级的开轮资格。</li>
+     *       弹幕/QQ 消息),或事先获授权的一次性 {@code wakeIdle} 事件例外。</li>
      * </ul>
      * push 即落盘(跨会话不失忆);死亡冻结期间丢弃。
      */
     public void pushEvent(String xml, boolean principal) {
+        pushEvent(xml, principal, false);
+    }
+
+    /**
+     * Event entry with delivery authority kept orthogonal to provenance.
+     * {@code wakeIdle} means an agent/owner explicitly prepaid one future idle wake;
+     * it never means the event producer is a human principal.
+     */
+    public void pushEvent(String xml, boolean principal, boolean wakeIdle) {
         if (dead) return;
         // 后台任务收尾:对上 id 清记账。注意先取"发生时的状态"再清——收尾事件
         // 本身发生在任务态,有资格立刻开轮(主动汇报"挖完了")。
@@ -763,10 +772,11 @@ public final class EntityAgentLoop {
             currentTask = null;
         }
         inbox.pushEvent(xml);
-        Constants.LOG.info("[numen-entity#{}] event inboxed{}{}: {}",
-                entityUuid, principal ? " (principal)" : "", duringTask ? " (during task)" : "",
+        Constants.LOG.info("[numen-entity#{}] event inboxed{}{}{}: {}",
+                entityUuid, principal ? " (principal)" : "", wakeIdle ? " (authorized wake)" : "",
+                duringTask ? " (during task)" : "",
                 truncate(xml, 120));
-        boolean wakeWorthy = principal || duringTask;
+        boolean wakeWorthy = EventWakePolicy.shouldStartTurn(principal, wakeIdle, duringTask);
         AgentTurnPause previousPause = turnPause;
         turnPause = turnPause.afterWakeEvent(wakeWorthy);
         if (previousPause != turnPause) {

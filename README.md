@@ -54,6 +54,8 @@ boolean queued = NumenGateway.enqueue(companionUuid, "QQ 里有人说：去给�
 
 同伴的回复通过**调用工具**（门三）离开，不走回调。入站 = 消息队列，出站 = 工具调用。任意线程都可安全调用，`enqueue` 内部会切到客户端主线程。
 
+服务端扩展若实现了由主人或 agent **事先登记的一次性唤醒租约**，可在租约到期时调用 `NumenEvents.emitAuthorizedWake`。它会让完全空闲的大脑开一轮，但不会把系统事件伪装成主人消息；普通环境观察不应走这个入口。返回 `false` 表示主人不在线、事件尚未送达，持久化生产者应保留租约稍后重试。
+
 ### 门二 —— `NumenActuator`：用外部大脑驱动身体
 
 完全绕过内置 LLM，直接驱动同伴的**身体**。契约是 **`acquire` → `invoke*` → `release`**：`acquire` 暂停内置大脑并腾出身体，让两个大脑不会抢同一具身体；`invoke` 无头地跑任意已注册工具，返回一个装着结果 JSON 的 `CompletableFuture`；`release` 把控制权交还。每次调用都指向一个同伴 UUID，各具身体独立跑任务，所以一个外部大脑可以 `acquire` 多个同伴、驱动一支**并行舰队**。MCP 服务器（numen-mcp）就是这样工作的。
@@ -114,7 +116,7 @@ ToolRegistry.register(new SendQqMessageTool());
 
 | 包 | 公共类型 | 作用 |
 |---|---|---|
-| `com.dwinovo.numen.api` | `NumenGateway`、`NumenActuator` | 喂输入 / 驱动同伴的两扇门 |
+| `com.dwinovo.numen.api` | `NumenGateway`、`NumenActuator`、`NumenEvents` | 喂输入、驱动身体、递送预授权唤醒 |
 | `com.dwinovo.numen.agent.tool` | `NumenTool`、`ToolRegistry`、`ToolCall` | 工具契约 + 注册 |
 | `com.dwinovo.numen.agent.tool.api` | `ToolContext` | 服务端工具的单次调用上下文 |
 | `com.dwinovo.numen.task` | `TaskResult` | 工具交回的结果信封 |

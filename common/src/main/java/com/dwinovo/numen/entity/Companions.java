@@ -219,6 +219,24 @@ public final class Companions {
     }
 
     /**
+     * Deliver an event using one unit of idle-wake authority granted beforehand by the
+     * owner/agent (for example, a one-shot scheduled reminder). This is deliberately
+     * separate from {@code principal}: the producer is still a system component, not a
+     * human speaker. Ordinary world/body facts must continue through
+     * {@link #emitEvent(NumenPlayer, String, boolean)} with {@code principal=false}.
+     *
+     * @return true only when an online owner existed and the wake packet was sent; a
+     *         durable producer should retain its lease and retry later when false
+     */
+    public static boolean emitAuthorizedWake(NumenPlayer body, String xml) {
+        ServerPlayer owner = body.resolveOwnerPlayer();
+        if (owner == null) return false;
+        Services.NETWORK.sendToPlayer(owner,
+                new NumenEventPayload(body.getUUID(), xml, false, true));
+        return true;
+    }
+
+    /**
      * The companion crossed into a new dimension — on its OWN (it travels where it likes, not tied to
      * the owner). Tell its brain, ambient: it rides along on the next owner-driven turn rather than
      * spending a fresh LLM call just to note the move. Called from each loader's dimension-change hook.

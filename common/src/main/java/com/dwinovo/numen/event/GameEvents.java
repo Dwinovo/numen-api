@@ -41,14 +41,40 @@ public final class GameEvents {
 
     /** 组装并发射一个世界事件(principal 恒为 false——事实不配自定紧急度)。 */
     public static void emit(NumenPlayer body, Kind kind, Map<String, String> attrs, String text) {
-        StringBuilder sb = new StringBuilder("<event kind=\"").append(kind.kind).append('"');
+        Companions.emitEvent(body, xml(kind, attrs, text), false);
+    }
+
+    /**
+     * 发射一个事先获模型/主人授权的一次性空闲唤醒。事件类型本身仍然没有
+     * 紧急度;开轮资格来自此次显式授权,不是事实生产者自报紧急。
+     *
+     * @return 在线主人存在且包已发送时为 true
+     */
+    public static boolean authorizedWake(NumenPlayer body, Kind kind,
+                                         Map<String, String> attrs, String text) {
+        return authorizedWake(body, kind.kind, attrs, text);
+    }
+
+    /** Internal implementation behind the public API facade. */
+    public static boolean authorizedWake(NumenPlayer body, String kind,
+                                         Map<String, String> attrs, String text) {
+        return Companions.emitAuthorizedWake(body, xml(kind, attrs, text));
+    }
+
+    private static String xml(Kind kind, Map<String, String> attrs, String text) {
+        return xml(kind.kind, attrs, text);
+    }
+
+    private static String xml(String kind, Map<String, String> attrs, String text) {
+        StringBuilder sb = new StringBuilder("<event kind=\"").append(escapeAttribute(kind)).append('"');
         if (attrs != null) {
             for (Map.Entry<String, String> e : attrs.entrySet()) {
-                sb.append(' ').append(e.getKey()).append("=\"").append(escape(e.getValue())).append('"');
+                sb.append(' ').append(e.getKey()).append("=\"")
+                        .append(escapeAttribute(e.getValue())).append('"');
             }
         }
         sb.append('>').append(escape(text)).append("</event>");
-        Companions.emitEvent(body, sb.toString(), false);
+        return sb.toString();
     }
 
     /** 异步任务收尾事件。{@code status} ∈ done / failed / timeout / stopped。 */
@@ -64,5 +90,9 @@ public final class GameEvents {
     /** XML 词汇表用尖括号,正文里的尖括号一律圆括号化,防注入也防解析歧义。 */
     public static String escape(String s) {
         return s == null ? "" : s.replace('<', '(').replace('>', ')');
+    }
+
+    private static String escapeAttribute(String s) {
+        return escape(s).replace("&", "&amp;").replace("\"", "&quot;");
     }
 }

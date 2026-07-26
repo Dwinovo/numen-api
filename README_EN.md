@@ -54,6 +54,8 @@ boolean queued = NumenGateway.enqueue(companionUuid, "someone in QQ says: go min
 
 Replies leave the companion by **calling a tool** (Door 3), not through a callback. Inbound = message queue; outbound = tool call. Safe to call from any thread; the enqueue is marshalled onto the client main thread.
 
+A server-side addon that implements a one-shot wake lease **authorized beforehand by the owner or agent** may call `NumenEvents.emitAuthorizedWake` when that lease becomes due. It can start a turn from full idle without impersonating a human principal. Ordinary world observations must not use this path. A `false` result means the owner was offline and delivery did not happen; a durable producer should retain the lease and retry later.
+
 ### Door 2 — `NumenActuator`: drive the body from an external brain
 
 Skip the built-in LLM entirely and drive a companion's **body** directly. The contract is **`acquire` → `invoke*` → `release`**: `acquire` pauses the built-in brain and frees the body so the two brains never fight over it; `invoke` runs any registered tool headlessly and returns a `CompletableFuture` of the result JSON; `release` hands control back. Every call is addressed to a companion UUID and bodies run tasks independently, so an external brain can acquire several companions and drive a **parallel fleet**. This is how the MCP server (numen-mcp) works.
@@ -114,7 +116,7 @@ The public API is the set of packages whose `package-info` declares them so, mir
 
 | Package | Public types | Role |
 |---|---|---|
-| `com.dwinovo.numen.api` | `NumenGateway`, `NumenActuator` | the two doors that feed / drive a companion |
+| `com.dwinovo.numen.api` | `NumenGateway`, `NumenActuator`, `NumenEvents` | feed the brain, drive the body, deliver pre-authorized wakes |
 | `com.dwinovo.numen.agent.tool` | `NumenTool`, `ToolRegistry`, `ToolCall` | the tool contract + registration |
 | `com.dwinovo.numen.agent.tool.api` | `ToolContext` | per-call context for a server-side tool |
 | `com.dwinovo.numen.task` | `TaskResult` | the result envelope a tool hands back |
