@@ -121,5 +121,29 @@ public final class NumenNetwork {
                 com.dwinovo.numen.network.payload.PathDebugPayload.ID,
                 com.dwinovo.numen.network.payload.PathDebugPayload::read,
                 com.dwinovo.numen.network.payload.PathDebugPayload::handle);
+
+        // C→S: the Group tab asks for a fresh snapshot of the owner's groups.
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.RequestGroupsPayload.ID,
+                com.dwinovo.numen.network.payload.RequestGroupsPayload::read,
+                com.dwinovo.numen.network.payload.RequestGroupsPayload::handle);
+
+        // C→S: create/disband a group, add/remove a member, delegate a task, or chat to the group.
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.GroupActionPayload.ID,
+                com.dwinovo.numen.network.payload.GroupActionPayload::read,
+                com.dwinovo.numen.network.payload.GroupActionPayload::handle);
+
+        // S→C: a full replacement snapshot of the owner's groups (name/members/live status).
+        Services.NETWORK.registerServerToClient(
+                com.dwinovo.numen.network.payload.GroupSyncPayload.ID,
+                com.dwinovo.numen.network.payload.GroupSyncPayload::read,
+                com.dwinovo.numen.network.payload.GroupSyncPayload::handle);
+
+        // C→S: a grouped companion's finished reply, to be relayed to its groupmates.
+        Services.NETWORK.registerClientToServer(
+                com.dwinovo.numen.network.payload.GroupRelayPayload.ID,
+                com.dwinovo.numen.network.payload.GroupRelayPayload::read,
+                com.dwinovo.numen.network.payload.GroupRelayPayload::handle);
     }
 }

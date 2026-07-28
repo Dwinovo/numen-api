@@ -1271,6 +1271,12 @@ public final class EntityAgentLoop {
             if (!turn.content().isEmpty()) {
                 Constants.LOG.info("[numen-entity#{}] assistant (final): {}",
                         entityUuid, turn.content());
+                // Grouped companions carry the conversation to each other, not just to the
+                // owner — see GroupRelayPayload/GroupMessaging#relay for the server-side half.
+                if (com.dwinovo.numen.client.social.GroupClientState.groupOf(entityUuid) != null) {
+                    Services.NETWORK.sendToServer(
+                            new com.dwinovo.numen.network.payload.GroupRelayPayload(entityUuid, turn.content()));
+                }
             } else {
                 Constants.LOG.info("[numen-entity#{}] assistant (final, empty content)", entityUuid);
             }
