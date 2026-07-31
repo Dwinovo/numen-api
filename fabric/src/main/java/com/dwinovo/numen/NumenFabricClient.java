@@ -59,28 +59,37 @@ public class NumenFabricClient implements ClientModInitializer {
 
         // N → companion roster panel (chat entry + settings/reset live in there).
         KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        // R(hold) → companion wheel; Y → quick chat; V(hold) → quick voice.
+        KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.COMPANION_WHEEL);
+        KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.TALK_COMPANION);
+        KeyBindingHelper.registerKeyBinding(com.dwinovo.numen.client.NumenKeys.QUICK_VOICE);
+
+        // HUD: 快捷对话提醒——准星指着同伴时浮「按 [键] 对话」。
+        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+                (g, delta) -> com.dwinovo.numen.client.hud.TalkHint.render(g));
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK
                 .register(client -> {
                     com.dwinovo.numen.client.NumenKeys.tick();
-                    com.dwinovo.numen.client.hud.NumenToasts.tick();
                     com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
                 });
 
-        // HUD: advancement-style activity toasts (top-right) when not watching a panel.
-        // 1.21.5 predates the HudElementRegistry layer API; use the classic HudRenderCallback.
-        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
-                (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
-
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT
                 .register((handler, client) -> {
+                    // 先掐大脑:作废在飞回合与工具链,别让上一个存档的回合漂进下一个存档
+                    com.dwinovo.numen.client.agent.AgentLoopRegistry.quiesceAll();
                     com.dwinovo.numen.client.data.ClientNumenInventory.clear();
                     com.dwinovo.numen.client.agent.KnownSkins.clear();
-                    com.dwinovo.numen.client.hud.NumenToasts.clear();
+                    com.dwinovo.numen.client.hud.SpeechBubbles.clear();
+                    com.dwinovo.numen.client.chat.SelectedCompanion.clear();
+                    com.dwinovo.numen.client.chat.QuickVoice.clear();
+                    com.dwinovo.numen.client.chat.ChatLines.clearLive();
                     com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
                     com.dwinovo.numen.client.debug.PathDebugState.clear();
                 });
 
         // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        // 头顶气泡不在这里——它走玩家实体渲染尾部(MixinPlayerRenderer),
+        // 与名牌同管线,光影下才正常。
         net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents.AFTER_TRANSLUCENT
                 .register(context -> {
                     if (context.matrixStack() != null) {
