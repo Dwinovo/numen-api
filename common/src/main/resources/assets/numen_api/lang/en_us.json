@@ -1,5 +1,8 @@
 {
   "key.numen.open_roster": "Open Companion Roster",
+  "key.numen.talk_companion": "Talk to Companion",
+  "key.numen.companion_wheel": "Companion Wheel (hold)",
+  "key.numen.quick_voice": "Quick Voice (hold)",
   "key.category.numen_api.companions": "Numen",
   "numen.brain.chat_locked": "🔌 External brain in control — turn it off in settings to chat",
   "numen.brain.console_empty": "No tool calls yet — the feed fills as the AI acts.",
@@ -117,6 +120,7 @@
   "numen.skin.add": "New",
   "numen.skin.delete_confirm": "Delete skin \"%s\"?",
   "numen.skin.drop_hint": "Drag a skin png (64x64) into the game window",
+  "numen.skin.pick_file": "Choose skin file (64x64 png)…",
   "numen.skin.empty": "No skins yet. Click New, then drag a skin png into the window.",
   "numen.skin.form_name": "Name (required)",
   "numen.skin.form_variant": "Arm model",

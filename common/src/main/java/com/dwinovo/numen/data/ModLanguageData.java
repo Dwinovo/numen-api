@@ -44,6 +44,15 @@ public final class ModLanguageData {
         /** Hotkey: open the companion roster panel (shown in Controls settings). */
         public static final String KEY_OPEN_ROSTER = "key.numen.open_roster";
 
+        /** Hotkey: talk to the companion under the crosshair (face-to-face chat). */
+        public static final String KEY_TALK_COMPANION = "key.numen.talk_companion";
+
+        /** Hotkey (hold): the companion wheel — pick the current interaction target. */
+        public static final String KEY_COMPANION_WHEEL = "key.numen.companion_wheel";
+
+        /** Hotkey (hold): push-to-talk voice to the current interaction target. */
+        public static final String KEY_QUICK_VOICE = "key.numen.quick_voice";
+
         /** Dedicated Controls category (KeyMapping.Category API). */
         public static final String KEY_CATEGORY_NUMEN = "key.category.numen_api.companions";
 
@@ -80,6 +89,8 @@ public final class ModLanguageData {
         public static final String SKIN_VARIANT_SLIM    = "numen.skin.variant_slim";
         public static final String SKIN_DROP_HINT       = "numen.skin.drop_hint";
         public static final String SKIN_LOADED          = "numen.skin.loaded";
+        /** 皮肤导入的唯一入口:原生文件对话框(FCL 端翻译成安卓文件选择器)。 */
+        public static final String SKIN_PICK_FILE       = "numen.skin.pick_file";
         public static final String SKIN_KEEP_OLD        = "numen.skin.keep_old";
         public static final String SKIN_SIGNING         = "numen.skin.signing";
         public static final String SKIN_SIGN_FAIL       = "numen.skin.sign_fail";
@@ -166,6 +177,9 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_SAVED,         "Saved");
 
         adder.add(Keys.KEY_OPEN_ROSTER, "Open Companion Roster");
+        adder.add(Keys.KEY_TALK_COMPANION, "Talk to Companion");
+        adder.add(Keys.KEY_COMPANION_WHEEL, "Companion Wheel (hold)");
+        adder.add(Keys.KEY_QUICK_VOICE, "Quick Voice (hold)");
         adder.add(Keys.KEY_CATEGORY_NUMEN, "Numen");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---
@@ -343,6 +357,7 @@ public final class ModLanguageData {
         adder.add(Keys.SKIN_VARIANT_SLIM,    "Slim (thin arms)");
         adder.add(Keys.SKIN_DROP_HINT,       "Drag a skin png (64x64) into the game window");
         adder.add(Keys.SKIN_LOADED,          "Loaded %s ✓ — Save signs it via MineSkin");
+        adder.add(Keys.SKIN_PICK_FILE,       "Choose skin file (64x64 png)…");
         adder.add(Keys.SKIN_KEEP_OLD,        "Keeping the current image (drag a new png to replace)");
         adder.add(Keys.SKIN_SIGNING,         "Signing via MineSkin… (a few seconds)");
         adder.add(Keys.SKIN_SIGN_FAIL,       "Signing failed: %s");
@@ -411,6 +426,9 @@ public final class ModLanguageData {
         adder.add(Keys.GUI_SETTINGS_SAVED,         "已保存");
 
         adder.add(Keys.KEY_OPEN_ROSTER, "打开同伴名册");
+        adder.add(Keys.KEY_TALK_COMPANION, "与同伴对话");
+        adder.add(Keys.KEY_COMPANION_WHEEL, "同伴轮盘(按住)");
+        adder.add(Keys.KEY_QUICK_VOICE, "快捷语音(按住)");
         adder.add(Keys.KEY_CATEGORY_NUMEN, "Numen");
 
         // --- consolidated into the datagen source (persona / mcp / reasoning / tabs / status ...) ---
@@ -585,6 +603,7 @@ public final class ModLanguageData {
         adder.add(Keys.SKIN_VARIANT_SLIM,    "纤细(瘦手臂)");
         adder.add(Keys.SKIN_DROP_HINT,       "把皮肤 png(64x64)直接拖进游戏窗口");
         adder.add(Keys.SKIN_LOADED,          "已加载 %s ✓——点保存经 MineSkin 签名");
+        adder.add(Keys.SKIN_PICK_FILE,       "选择皮肤文件(64x64 png)…");
         adder.add(Keys.SKIN_KEEP_OLD,        "沿用当前图片(拖入新 png 可替换)");
         adder.add(Keys.SKIN_SIGNING,         "MineSkin 签名中…(需要几秒)");
         adder.add(Keys.SKIN_SIGN_FAIL,       "签名失败: %s");
