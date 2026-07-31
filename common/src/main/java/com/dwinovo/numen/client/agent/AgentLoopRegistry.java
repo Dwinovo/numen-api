@@ -45,10 +45,10 @@ public final class AgentLoopRegistry {
     }
 
     /**
-     * UUIDs of the companions whose loop is mid-turn ({@link EntityAgentLoop#canInterrupt()}
-     * — thinking, awaiting tool results, or with a queued prompt). These are the
-     * heartbeat targets: a server-side chunk-ticket lease should be held for each
-     * so the body stays loaded through the owner's think-time.
+     * UUIDs of companions with interruptible work ({@link EntityAgentLoop#canInterrupt()} —
+     * thinking, awaiting tool results, running a background body task, or holding queued input).
+     * These are the heartbeat targets: a server-side chunk-ticket lease should be held for each
+     * so the body stays loaded through both model think-time and long-running work.
      */
     public static List<UUID> activeEntityUuids() {
         List<UUID> out = new ArrayList<>();
@@ -76,6 +76,19 @@ public final class AgentLoopRegistry {
     public static void tickAll() {
         for (EntityAgentLoop loop : ENTITY_LOOPS.values()) {
             loop.clientTick();
+        }
+    }
+
+    /**
+     * 断线静默:对所有 loop 执行 abort——代数戳作废在飞的 LLM 回应、给未决
+     * 工具调用合成取消结果、清空半截打字。对话内存保留(同一存档重进接着聊);
+     * 跨存档的旧 loop 静置无害(新存档同伴 UUID 不同,寻址不到它们)。
+     * 不这么做的话:上一个存档的在飞回合会在下一个存档里落地,工具回合还会
+     * 继续链式开新请求——对着不存在的同伴空转烧 token。
+     */
+    public static void quiesceAll() {
+        for (EntityAgentLoop loop : ENTITY_LOOPS.values()) {
+            loop.abort();
         }
     }
 
