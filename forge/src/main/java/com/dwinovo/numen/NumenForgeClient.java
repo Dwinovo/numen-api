@@ -7,7 +7,6 @@ import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -47,6 +46,8 @@ public final class NumenForgeClient {
 
     static void onRenderLevel(net.minecraftforge.client.event.RenderLevelStageEvent event) {
         // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        // 头顶气泡不在这里——它走玩家实体渲染尾部(MixinPlayerRenderer),
+        // 与名牌同管线,光影下才正常。
         if (event.getStage() == net.minecraftforge.client.event.RenderLevelStageEvent.Stage
                 .AFTER_TRANSLUCENT_BLOCKS) {
             com.dwinovo.numen.client.debug.PathDebugRenderer.render(
@@ -71,6 +72,10 @@ public final class NumenForgeClient {
     static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         // G → companion roster panel (chat entry + settings/reset live in there).
         event.register(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        // R(hold) → companion wheel; Y → quick chat; V(hold) → quick voice.
+        event.register(com.dwinovo.numen.client.NumenKeys.COMPANION_WHEEL);
+        event.register(com.dwinovo.numen.client.NumenKeys.TALK_COMPANION);
+        event.register(com.dwinovo.numen.client.NumenKeys.QUICK_VOICE);
     }
 
     static void onClientTick(TickEvent.ClientTickEvent event) {
@@ -78,24 +83,27 @@ public final class NumenForgeClient {
             return;
         }
         com.dwinovo.numen.client.NumenKeys.tick();
-        com.dwinovo.numen.client.hud.NumenToasts.tick();
         com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
     }
 
     static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        // 先掐大脑:作废在飞回合与工具链,别让上一个存档的回合漂进下一个存档
+        com.dwinovo.numen.client.agent.AgentLoopRegistry.quiesceAll();
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
         com.dwinovo.numen.client.agent.KnownSkins.clear();
-        com.dwinovo.numen.client.hud.NumenToasts.clear();
+        com.dwinovo.numen.client.hud.SpeechBubbles.clear();
+        com.dwinovo.numen.client.chat.SelectedCompanion.clear();
+        com.dwinovo.numen.client.chat.QuickVoice.clear();
+        com.dwinovo.numen.client.chat.ChatLines.clearLive();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
         com.dwinovo.numen.client.debug.PathDebugState.clear();
     }
 
     static void registerGuiOverlays(RegisterGuiOverlaysEvent event) {
-        // HUD: advancement-style activity toasts (top-right) when not watching a panel.
-        // Forge 1.20.4 overlay API: register above the whole vanilla HUD chat layer.
-        event.registerAbove(VanillaGuiOverlay.CHAT_PANEL.id(), "numen_toasts",
+        // HUD: 快捷对话提醒——准星指着同伴时浮「按 [键] 对话」。
+        event.registerAboveAll("talk_hint",
                 (gui, g, partialTick, screenWidth, screenHeight) ->
-                        com.dwinovo.numen.client.hud.NumenToasts.render(g));
+                        com.dwinovo.numen.client.hud.TalkHint.render(g));
     }
 
     static void registerReloadListeners(RegisterClientReloadListenersEvent event) {

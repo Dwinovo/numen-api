@@ -10,8 +10,10 @@
     "MixinServerGamePacketListener"
   ],
   "client": [
-    "MixinMinecraft",
-    "MixinPlayerInfo"
+    "ChatComponentAccessor",
+    "MixinKeyboardInput",
+    "MixinPlayerInfo",
+    "MixinPlayerRenderer"
   ],
   "server": [],
   "injectors": {
