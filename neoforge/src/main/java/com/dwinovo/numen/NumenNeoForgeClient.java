@@ -52,6 +52,8 @@ public class NumenNeoForgeClient {
 
     static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent event) {
         // 寻路调试覆盖层:世界空间画线(半透明方块阶段之后)。
+        // 头顶气泡不在这里——它走玩家实体渲染尾部(MixinPlayerRenderer),
+        // 与名牌同管线,光影下才正常。
         if (event.getStage() == net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage
                 .AFTER_TRANSLUCENT_BLOCKS) {
             com.dwinovo.numen.client.debug.PathDebugRenderer.render(
@@ -62,34 +64,42 @@ public class NumenNeoForgeClient {
     static void registerKeyMappings(net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent event) {
         // G → companion roster panel (chat entry + settings/reset live in there).
         event.register(com.dwinovo.numen.client.NumenKeys.OPEN_ROSTER);
+        // R(hold) → companion wheel; Y → quick chat; V(hold) → quick voice.
+        event.register(com.dwinovo.numen.client.NumenKeys.COMPANION_WHEEL);
+        event.register(com.dwinovo.numen.client.NumenKeys.TALK_COMPANION);
+        event.register(com.dwinovo.numen.client.NumenKeys.QUICK_VOICE);
+    }
+
+    static void registerGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {
+        // HUD: 快捷对话提醒——准星指着同伴时浮「按 [键] 对话」。
+        event.registerAboveAll(
+                ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "talk_hint"),
+                (g, delta) -> com.dwinovo.numen.client.hud.TalkHint.render(g));
     }
 
     static void onClientTick(net.neoforged.neoforge.client.event.ClientTickEvent.Post event) {
         com.dwinovo.numen.client.NumenKeys.tick();
-        com.dwinovo.numen.client.hud.NumenToasts.tick();
         com.dwinovo.numen.client.agent.AgentLoopRegistry.tickAll();
     }
 
     static void onLoggingOut(net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
+        // 先掐大脑:作废在飞回合与工具链,别让上一个存档的回合漂进下一个存档
+        com.dwinovo.numen.client.agent.AgentLoopRegistry.quiesceAll();
         com.dwinovo.numen.client.data.ClientNumenInventory.clear();
         com.dwinovo.numen.client.agent.KnownSkins.clear();
-        com.dwinovo.numen.client.hud.NumenToasts.clear();
+        com.dwinovo.numen.client.hud.SpeechBubbles.clear();
+        com.dwinovo.numen.client.chat.SelectedCompanion.clear();
+        com.dwinovo.numen.client.chat.QuickVoice.clear();
+        com.dwinovo.numen.client.chat.ChatLines.clearLive();
         com.dwinovo.numen.client.agent.ClientDeaths.clearAll();
         com.dwinovo.numen.client.debug.PathDebugState.clear();
-    }
-
-    static void registerGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {
-        // HUD: advancement-style activity toasts (top-right) when not watching a panel.
-        event.registerAboveAll(
-                ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "numen_toasts"),
-                (g, delta) -> com.dwinovo.numen.client.hud.NumenToasts.render(g));
     }
 
     // 1.21.5 起 shader 走代码定义的 RenderPipeline,首次使用时懒编译,无需任何
     // loader 侧注册(RegisterShadersEvent 已随 JSON shader 体系一并移除)。
 
     static void registerReloadListeners(AddClientReloadListenersEvent event) {
-        // 1.21.4 uses AddClientReloadListenersEvent.addListener(ResourceLocation, listener) —
+        // 1.21.5 uses AddClientReloadListenersEvent.addListener(ResourceLocation, listener) —
         // the keyed API (1.21.1 was RegisterClientReloadListenersEvent.registerReloadListener,
         // no key).
         Path numenConfigRoot = Minecraft.getInstance().gameDirectory.toPath()
