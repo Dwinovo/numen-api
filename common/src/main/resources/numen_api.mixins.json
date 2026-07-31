@@ -9,7 +9,9 @@
     "MixinServerCommonPacketListener"
   ],
   "client": [
-    "MixinMinecraft"
+    "ChatComponentAccessor",
+    "MixinKeyboardInput",
+    "MixinLivingEntityRenderer"
   ],
   "server": [],
   "injectors": {
