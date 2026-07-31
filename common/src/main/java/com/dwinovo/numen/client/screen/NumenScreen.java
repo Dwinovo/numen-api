@@ -132,6 +132,9 @@ public final class NumenScreen extends Screen {
     private Dropdown summonPersonaDropdown;
     /** Provider entry for the new companion — REQUIRED (no default, no fallback). */
     private Dropdown summonProviderDropdown;
+    /** 召唤时的游戏模式选择(默认生存;创造在服务端过权限门)。 */
+    private Dropdown summonModeDropdown;
+    private boolean summonCreative;
     private String summonProviderId;
     /** Voice entry for the new companion — optional (null = silent). */
     private Dropdown summonVoiceDropdown;
@@ -341,8 +344,25 @@ public final class NumenScreen extends Screen {
             }
             if (summonProviderId == null) summonProviderId = provEntries.get(0).id();
             summonProviderDropdown = new Dropdown(provItems, summonProviderId);
-            summonProviderDropdown.setBounds(sumX(), y0 + 102, sumW(), 18);
+            // 模型行与模式下拉平分一行(左模型右模式)。
+            summonProviderDropdown.setBounds(sumX(), y0 + 102, summonHalfW(), 18);
             summonProviderDropdown.setDropBottom(top + panelH - 2);
+        }
+        // 游戏模式:有 gamemode 权限(等级 2,原版已同步到客户端)才给下拉自选;
+        // 没有就继承主人当前档(非创造一律按生存),渲染为置灰不可点 + 悬停说明。
+        boolean canChooseMode = this.minecraft != null && this.minecraft.player != null
+                && this.minecraft.player.hasPermissions(2);
+        if (canChooseMode) {
+            summonModeDropdown = new Dropdown(List.of(
+                    new Dropdown.Item("survival", "生存"),
+                    new Dropdown.Item("creative", "创造")),
+                    summonCreative ? "creative" : "survival");
+            summonModeDropdown.setBounds(sumX() + summonHalfW() + 6, y0 + 102, summonHalfW(), 18);
+            summonModeDropdown.setDropBottom(top + panelH - 2);
+        } else {
+            summonModeDropdown = null;
+            summonCreative = this.minecraft != null && this.minecraft.player != null
+                    && this.minecraft.player.isCreative();
         }
         // OPTIONAL voice — first item = 无(静音), entries follow (same pattern as the
         // persona pick above); an empty library shows no dropdown, just a hint.
@@ -389,7 +409,7 @@ public final class NumenScreen extends Screen {
      * 最优先),然后按行序。返回 true = 消费了本次点击。
      */
     private boolean routeSummonDropdownClick(double mx, double my) {
-        Dropdown[] all = {summonPersonaDropdown, summonProviderDropdown,
+        Dropdown[] all = {summonPersonaDropdown, summonProviderDropdown, summonModeDropdown,
                 summonVoiceDropdown, summonSkinDropdown};
         Dropdown open = null;
         for (Dropdown d : all) {
@@ -402,6 +422,8 @@ public final class NumenScreen extends Screen {
                 summonPersonaId = PERSONA_DEFAULT.equals(sel) ? null : sel;
             } else if (d == summonProviderDropdown) {
                 summonProviderId = sel;
+            } else if (d == summonModeDropdown) {
+                summonCreative = "creative".equals(sel);
             } else if (d == summonVoiceDropdown) {
                 summonVoiceId = VOICE_NONE.equals(sel) ? null : sel;
             } else {
@@ -414,9 +436,9 @@ public final class NumenScreen extends Screen {
         return false;
     }
 
-    /** 召唤页四个下拉的渲染:收起的先画,正展开的最后画(列表压在一切之上)。 */
+    /** 召唤页下拉的渲染:收起的先画,正展开的最后画(列表压在一切之上)。 */
     private void renderSummonDropdowns(GuiGraphics g, int mouseX, int mouseY) {
-        Dropdown[] all = {summonSkinDropdown, summonVoiceDropdown,
+        Dropdown[] all = {summonSkinDropdown, summonVoiceDropdown, summonModeDropdown,
                 summonProviderDropdown, summonPersonaDropdown};
         Dropdown open = null;
         for (Dropdown d : all) {
@@ -759,16 +781,24 @@ public final class NumenScreen extends Screen {
         com.dwinovo.numen.Constants.LOG.info("[numen-skin] 召唤 {}: 皮肤选择={} 条目={} 携带签名数据={}",
                 n, summonSkinId, skinEntry == null ? "null" : skinEntry.name(), !skinValue.isEmpty());
         Services.NETWORK.sendToServer(
-                new com.dwinovo.numen.network.payload.SummonRequestPayload(n, skinValue, skinSig));
+                new com.dwinovo.numen.network.payload.SummonRequestPayload(n, skinValue, skinSig,
+                        summonCreative));
         summoning = false;
         summonPersonaId = null;
         summonProviderId = null;
         summonVoiceId = null;
+        summonCreative = false;
         rebuild();   // the new companion arrives via CompanionListPayload — click its avatar to open
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // 崩溃护栏:点击处理出错按"未消费"降级,面板还能继续用
+        return com.dwinovo.numen.client.ui.SafeUi.click("panel-click",
+                () -> mouseClickedInner(mouseX, mouseY, button));
+    }
+
+    private boolean mouseClickedInner(double mouseX, double mouseY, int button) {
         if (dismissPending != null) {
             return super.mouseClicked(mouseX, mouseY, button);   // modal confirm — let its Cancel/Delete buttons handle it
         }
@@ -798,7 +828,7 @@ public final class NumenScreen extends Screen {
             }
             if (railPlusAt((int) mouseX, (int) mouseY)) {   // + → start the summon name prompt
                 summoning = !summoning;
-                if (summoning) { summonPersonaId = null; summonVoiceId = null; summonSkinId = null; }   // fresh summon starts at "默认/无"
+                if (summoning) { summonPersonaId = null; summonVoiceId = null; summonSkinId = null; summonCreative = false; }   // fresh summon starts at "默认/无/生存"
                 rebuild();
                 return true;
             }
@@ -870,6 +900,15 @@ public final class NumenScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
+        // 崩溃护栏:面板渲染的任何异常都不许带走游戏——降级成一行红字
+        if (!com.dwinovo.numen.client.ui.SafeUi.run("panel-render",
+                () -> renderInner(g, mouseX, mouseY, partial))) {
+            g.drawString(font, "Numen 面板渲染出错,已兜底——详情见 latest.log",
+                    left + 10, top + 10, 0xFFFF6B6B, true);
+        }
+    }
+
+    private void renderInner(GuiGraphics g, int mouseX, int mouseY, float partial) {
         super.render(g, mouseX, mouseY, partial);
         pendingTip = null;   // recollected each frame by the section renderers
 
@@ -937,6 +976,21 @@ public final class NumenScreen extends Screen {
             txt(g, Component.literal(I18n.get(ModLanguageData.Keys.PROVIDER_TITLE)
                     + (summonProviderDropdown == null ? I18n.get(ModLanguageData.Keys.SUMMON_PROVIDER_EMPTY) : "")),
                     sumX(), y0 + 92, TXT_MUTED);
+            txt(g, Component.literal("模式"), sumX() + summonHalfW() + 6, y0 + 92, TXT_MUTED);
+            if (summonModeDropdown == null) {
+                // 无 gamemode 权限:置灰的继承档,悬停解释为什么点不了
+                int mx0 = sumX() + summonHalfW() + 6, my0 = y0 + 102;
+                com.dwinovo.numen.client.ui.RoundRect.card(g, mx0, my0,
+                        mx0 + summonHalfW(), my0 + 18, 4,
+                        UiTheme.current().field(), UiTheme.current().surfaceBorder());
+                txt(g, Component.literal((summonCreative ? "创造" : "生存") + "(继承)"),
+                        mx0 + 6, my0 + 5, TXT_FAINT);
+                if (mouseX >= mx0 && mouseX < mx0 + summonHalfW()
+                        && mouseY >= my0 && mouseY < my0 + 18) {
+                    g.renderTooltip(font, Component.literal(
+                            "没有 gamemode 权限——同伴将继承你当前的模式"), mouseX, mouseY);
+                }
+            }
             txt(g, Component.literal(I18n.get(ModLanguageData.Keys.VOICE_SUMMON_LABEL)
                     + (summonVoiceDropdown == null ? I18n.get(ModLanguageData.Keys.VOICE_SUMMON_EMPTY) : "")),
                     sumX(), y0 + 126, TXT_MUTED);

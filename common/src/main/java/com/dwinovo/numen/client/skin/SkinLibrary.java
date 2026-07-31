@@ -76,6 +76,7 @@ public final class SkinLibrary {
         return skinDir.resolve(id + ".png");
     }
 
+
     /** 新建/更新条目并持久化;{@code png} 非 null 时一并写盘(新图/换图)。 */
     public void put(Entry e, byte[] png) {
         entries.put(e.id(), e);
