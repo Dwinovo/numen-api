@@ -79,6 +79,16 @@ public final class GuiCompat {
         g.blit(tex, dx, dy, dw, dh, (float) u, (float) v, srcW, srcH, texW, texH);
     }
 
+    /**
+     * Draw one icon out of the vanilla HUD atlas by UV — the pre-sprite-id way, and the way vanilla
+     * itself still draws hearts / hunger shanks on this game version. Callers pass the same
+     * {@code (u, v)} the vanilla HUD code uses, so the pixels are literally vanilla's: no copy of a
+     * vanilla texture is shipped in this mod's assets.
+     */
+    public static void blitHudIcon(GuiGraphics g, int x, int y, int u, int v, int w, int h) {
+        g.blit(com.dwinovo.numen.mixin.GuiIconsAccessor.numen$iconsAtlas(), x, y, u, v, w, h);
+    }
+
     private static SpriteMeta load(ResourceLocation tex) {
         ResourceManager rm = Minecraft.getInstance().getResourceManager();
         int texW = 16;

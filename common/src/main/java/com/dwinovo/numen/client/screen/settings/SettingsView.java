@@ -1565,14 +1565,23 @@ public final class SettingsView {
             int fy = fy0();
             txt(g, Component.translatable(ModLanguageData.Keys.SKIN_FORM_NAME), x, fy, TXT_MUTED);
             txt(g, Component.translatable(ModLanguageData.Keys.SKIN_FORM_VARIANT), x, fy + SET_SP, TXT_MUTED);
-            // 拖拽区:提示文字 + 已加载状态(新图优先;编辑态没换图就提示沿用原图)。
+            // 导入区:唯一入口「选择文件…」——原生文件对话框(FCL 会把它翻译成
+            // 安卓的文件选择器);拖拽入窗仍被 onFilesDrop 静默接住,不再宣传。
             int dy = fy + 2 * SET_SP + 4;
-            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_DROP_HINT), x, dy, TXT_FAINT);
+            UiTheme sth = UiTheme.current();
+            int[] rc = skinChipRect();
+            boolean hov = mouseX >= rc[0] && mouseX < rc[0] + rc[2]
+                    && mouseY >= rc[1] && mouseY < rc[1] + rc[3];
+            com.dwinovo.numen.client.ui.RoundRect.card(g, rc[0], rc[1],
+                    rc[0] + rc[2], rc[1] + rc[3], 3, sth.field(),
+                    hov ? CTA : sth.surfaceBorder());
+            txt(g, Component.translatable(ModLanguageData.Keys.SKIN_PICK_FILE),
+                    rc[0] + 6, rc[1] + 4, TXT);
             if (skinDropped != null) {
                 txt(g, Component.translatable(ModLanguageData.Keys.SKIN_LOADED,
-                        skinDroppedW + "x" + skinDroppedH), x, dy + 12, OK);
+                        skinDroppedW + "x" + skinDroppedH), x, dy + 22, OK);
             } else if (skinEditId != null) {
-                txt(g, Component.translatable(ModLanguageData.Keys.SKIN_KEEP_OLD), x, dy + 12, TXT_FAINT);
+                txt(g, Component.translatable(ModLanguageData.Keys.SKIN_KEEP_OLD), x, dy + 22, TXT_FAINT);
             }
             if (skinMsg != null && skinMsgUntil > System.currentTimeMillis()) {
                 txt(g, Component.literal(clip(skinMsg, w - 94)), x, fBottom() - 14,
@@ -1623,12 +1632,25 @@ public final class SettingsView {
         }
     }
 
+    /** 「选择文件…」按钮矩形 {x, y, w, h}(render 与 click 同一套推导)。 */
+    private int[] skinChipRect() {
+        int x = fx();
+        int cy = fy0() + 2 * SET_SP + 4;
+        int w0 = font().width(I18n.get(ModLanguageData.Keys.SKIN_PICK_FILE)) + 14;
+        return new int[]{x, cy, w0, 16};
+    }
+
     private boolean skinClick(int mx, int my) {
         if (skinDeletePending != null) return false;
         if (addingSkin) {
             // 手臂模型下拉先于其它命中(展开列表覆盖在表单文字上)。
             if (skinVariantDropdown != null && skinVariantDropdown.mouseClicked(mx, my)) {
                 wSkinVariant = skinVariantDropdown.selectedId();
+                return true;
+            }
+            int[] rc = skinChipRect();
+            if (mx >= rc[0] && mx < rc[0] + rc[2] && my >= rc[1] && my < rc[1] + rc[3]) {
+                openNativeSkinPicker();
                 return true;
             }
             return false;
@@ -1656,28 +1678,54 @@ public final class SettingsView {
         if (!(section == Section.SKIN && addingSkin)) return;
         for (java.nio.file.Path p : paths) {
             if (!p.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) continue;
-            try {
-                byte[] bytes = java.nio.file.Files.readAllBytes(p);
-                try (var img = com.mojang.blaze3d.platform.NativeImage.read(
-                        new java.io.ByteArrayInputStream(bytes))) {
-                    int iw = img.getWidth(), ih = img.getHeight();
-                    if (iw != 64 || (ih != 64 && ih != 32)) {
-                        skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_SIZE, iw + "x" + ih), true);
-                        return;
-                    }
-                    if (skinNameInput != null) wSkinName = skinNameInput.getValue();
-                    skinDropped = bytes;
-                    skinDroppedW = iw;
-                    skinDroppedH = ih;
-                    skinNote(I18n.get(ModLanguageData.Keys.SKIN_LOADED, iw + "x" + ih), false);
+            importSkinFile(p);
+            return;
+        }
+    }
+
+    /** 皮肤导入的统一入口:拖拽、原生文件对话框、导入文件夹点选三条路共用。 */
+    private void importSkinFile(java.nio.file.Path p) {
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(p);
+            try (var img = com.mojang.blaze3d.platform.NativeImage.read(
+                    new java.io.ByteArrayInputStream(bytes))) {
+                int iw = img.getWidth(), ih = img.getHeight();
+                if (iw != 64 || (ih != 64 && ih != 32)) {
+                    skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_SIZE, iw + "x" + ih), true);
                     return;
                 }
-            } catch (java.io.IOException | RuntimeException ex) {
-                skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_READ, ex.getMessage() == null
-                        ? ex.getClass().getSimpleName() : ex.getMessage()), true);
-                return;
+                if (skinNameInput != null) wSkinName = skinNameInput.getValue();
+                skinDropped = bytes;
+                skinDroppedW = iw;
+                skinDroppedH = ih;
+                skinNote(I18n.get(ModLanguageData.Keys.SKIN_LOADED, iw + "x" + ih), false);
             }
+        } catch (java.io.IOException | RuntimeException ex) {
+            skinNote(I18n.get(ModLanguageData.Keys.SKIN_WARN_READ, ex.getMessage() == null
+                    ? ex.getClass().getSimpleName() : ex.getMessage()), true);
         }
+    }
+
+    /** 原生文件对话框(LWJGL tinyfd,MC 自带;FCL 端会翻译成安卓文件选择器):
+     *  独立线程弹窗防冻主循环,选中后回主线程导入。 */
+    private void openNativeSkinPicker() {
+        new Thread(() -> {
+            String chosen = null;
+            try (var stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                var filters = stack.mallocPointer(1);
+                filters.put(stack.UTF8("*.png")).flip();
+                chosen = org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog(
+                        "Numen skin (64x64 png)", null, filters, "PNG", false);
+            } catch (Throwable t) {
+                com.dwinovo.numen.Constants.LOG.warn("[numen-skin] native file dialog unavailable", t);
+            }
+            String path = chosen;
+            net.minecraft.client.Minecraft.getInstance().execute(() -> {
+                if (path != null && section == Section.SKIN && addingSkin) {
+                    importSkinFile(java.nio.file.Path.of(path));
+                }
+            });
+        }, "numen-skin-picker").start();
     }
 
     // ---- render (nav + active section) ----
@@ -1739,6 +1787,12 @@ public final class SettingsView {
                 txt(g, Component.literal("✔"), x + 38 + font().width(t.label()) + 6, ry + 3, OK);
             }
         }
+        // 快捷对话提醒开关行(默认开:准星指着同伴时浮「按 [键] 对话」)
+        int hy = listY0 + UiTheme.ALL.size() * LIST_ROW + 8;
+        hoverRow(g, mouseX, mouseY, x, secW(), hy);
+        boolean hintOn = UiTheme.talkHintEnabled();
+        txt(g, Component.literal((hintOn ? "[开] " : "[关] ") + "快捷对话提醒(准星指着同伴时提示按键)"),
+                x, hy + 3, hintOn ? TXT : TXT_MUTED);
     }
 
     private void renderProviderSection(GuiGraphics g, int mouseX, int mouseY) {
@@ -2236,6 +2290,11 @@ public final class SettingsView {
                     host.repaintPalette();          // 屏幕的调色板常量重读新主题
                     return true;
                 }
+            }
+            int hy = listY0 + UiTheme.ALL.size() * LIST_ROW + 8;
+            if (my >= hy && my < hy + LIST_ROW) {
+                UiTheme.setTalkHint(!UiTheme.talkHintEnabled());
+                return true;
             }
         }
         if (section == Section.MCP) return mcpToggleClick(mx, my);

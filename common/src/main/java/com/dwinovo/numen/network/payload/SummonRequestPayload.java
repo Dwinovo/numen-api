@@ -18,7 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
  * 采用(签名自验证,客户端伪造不了);为空 = <b>名字就是皮肤来源</b>,服务端异步查
  * 同名正版玩家,查到穿其皮肤,查不到静默回落默认皮肤(日志可查,不打扰玩家)。
  */
-public record SummonRequestPayload(String name, String skinValue, String skinSig)
+public record SummonRequestPayload(String name, String skinValue, String skinSig, boolean creative)
         implements NumenPayload {
 
     public static final int MAX_NAME = 16;
@@ -39,11 +39,12 @@ public record SummonRequestPayload(String name, String skinValue, String skinSig
         buf.writeUtf(name, MAX_NAME);
         buf.writeUtf(skinValue == null ? "" : skinValue, MAX_SKIN_VALUE);
         buf.writeUtf(skinSig == null ? "" : skinSig, MAX_SKIN_SIG);
+        buf.writeBoolean(creative);
     }
 
     public static SummonRequestPayload read(FriendlyByteBuf buf) {
         return new SummonRequestPayload(buf.readUtf(MAX_NAME),
-                buf.readUtf(MAX_SKIN_VALUE), buf.readUtf(MAX_SKIN_SIG));
+                buf.readUtf(MAX_SKIN_VALUE), buf.readUtf(MAX_SKIN_SIG), buf.readBoolean());
     }
 
     /** 正在异步召唤中的 owner/name 键——皮肤查询窗口内吃掉重复请求,防双击造重。 */
@@ -74,9 +75,10 @@ public record SummonRequestPayload(String name, String skinValue, String skinSig
             com.dwinovo.numen.Constants.LOG.info("[numen-skin] 召唤 {} 携带自定义皮肤数据,直接入册", name);
             try {
                 ServerLevel level = (ServerLevel) owner.level();
-                Companions.summon(server, owner.getUUID(), name, level, owner.position(),
+                var body = Companions.summon(server, owner.getUUID(), name, level, owner.position(),
                         new com.dwinovo.numen.entity.MojangSkins.Skin(value,
                                 p.skinSig() == null ? "" : p.skinSig()));
+                applyMode(owner, body, p.creative());
                 Companions.syncRosterToOwner(server, owner);
             } finally {
                 SPAWNING.remove(spawnKey);
@@ -89,11 +91,30 @@ public record SummonRequestPayload(String name, String skinValue, String skinSig
             try {
                 if (owner.hasDisconnected()) return;
                 ServerLevel level = (ServerLevel) owner.level();
-                Companions.summon(server, owner.getUUID(), name, level, owner.position(), skin);
+                var body = Companions.summon(server, owner.getUUID(), name, level, owner.position(), skin);
+                applyMode(owner, body, p.creative());
                 Companions.syncRosterToOwner(server, owner);   // push the new roster to the owner
             } finally {
                 SPAWNING.remove(spawnKey);
             }
         }));
+    }
+
+    /**
+     * 召唤表单选的游戏模式落地。创造档过权限门:主人有 /gamemode 权限
+     * (等级 2)<b>或本人就在创造</b>(无权限时客户端继承主人档)都放行;
+     * 都不满足(伪造/竞态)按生存并说明——同伴的模式上限 = 主人的上限。
+     */
+    private static void applyMode(ServerPlayer owner, com.dwinovo.numen.entity.NumenPlayer body,
+                                  boolean creative) {
+        if (body == null || !creative) {
+            return;   // 生存是出厂默认(CompanionFactory 已保证),无须重复设置
+        }
+        if (!owner.hasPermissions(2) && !owner.isCreative()) {
+            owner.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "[Numen] 创造档需要作弊/OP 权限,已按生存召唤"));
+            return;
+        }
+        body.setGameMode(net.minecraft.world.level.GameType.CREATIVE);
     }
 }
