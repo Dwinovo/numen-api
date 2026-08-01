@@ -72,7 +72,10 @@ public final class SpeechBubbleRenderer {
         // 锚点在名牌上方:小方尾的尖端落在这里,气泡向上生长
         poseStack.translate(0, body.getBbHeight() + 0.95, 0);
         poseStack.mulPose(mc.getEntityRenderDispatcher().cameraOrientation());
-        poseStack.scale(SCALE, -SCALE, SCALE);
+        // X 与 Y 同时取反:与原版名牌同一套手性。只翻 Y 会让行列式为负——整个
+        // 空间被镜像,所有面的绕序随之翻转而被背面剔除(自己的方块可以双面画糊
+        // 过去,原版画的字形不能,结果就是"有框没字")。
+        poseStack.scale(-SCALE, -SCALE, SCALE);
         drawBubble(poseStack, buffers, mc.font, bubble);
         poseStack.popPose();
     }
@@ -80,7 +83,7 @@ public final class SpeechBubbleRenderer {
     /**
      * 局部坐标:+y 朝下(朝说话者),气泡主体在 y∈[-boxH,0],小方尾从
      * 底边中央伸到 (0,TAIL_H)。层次靠 z 拉开——名牌 billboard 空间里
-     * <b>+z 朝观察者</b>:阴影垫底(0)、边框、填充逐层抬高,文字最前。
+     * <b>+z 朝屏幕里</b>:阴影垫底(0),边框、填充、文字逐层往负 z 压,越靠前越负。
      */
     private static void drawBubble(PoseStack poseStack, MultiBufferSource buffers,
                                    Font font, SpeechBubbles.Bubble bubble) {
@@ -108,15 +111,15 @@ public final class SpeechBubbleRenderer {
         quad(vc, m, x0 + SHADOW_OFF, y0 + SHADOW_OFF, x1 + SHADOW_OFF, y1 + SHADOW_OFF,
                 0.0f, th.border());
         // 粗边:比填充大一圈的同心方
-        quad(vc, m, x0 - 1, y0 - 1, x1 + 1, y1 + 1, 0.02f, th.border());
-        quad(vc, m, x0, y0, x1, y1, 0.04f, bubble.thinking() ? th.surface() : th.aiFill());
+        quad(vc, m, x0 - 1, y0 - 1, x1 + 1, y1 + 1, -0.02f, th.border());
+        quad(vc, m, x0, y0, x1, y1, -0.04f, bubble.thinking() ? th.surface() : th.aiFill());
         // 小方尾:边框菱形在后,填充菱形在前,尖端指向说话者
-        diamond(vc, m, 0, y1, 5, TAIL_H + 1, 0.02f, th.border());
-        diamond(vc, m, 0, y1 - 1, 4, TAIL_H, 0.04f, bubble.thinking() ? th.surface() : th.aiFill());
+        diamond(vc, m, 0, y1, 5, TAIL_H + 1, -0.02f, th.border());
+        diamond(vc, m, 0, y1 - 1, 4, TAIL_H, -0.04f, bubble.thinking() ? th.surface() : th.aiFill());
 
         // 文字压最前(drawInBatch 没有 z 参,用矩阵抬)
         poseStack.pushPose();
-        poseStack.translate(0, 0, 0.06f);
+        poseStack.translate(0, 0, -0.06f);
         int color = bubble.thinking() ? th.textDim() : th.text();
         float ty = y0 + PAD_Y + 1;
         for (String line : lines) {
