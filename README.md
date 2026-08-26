@@ -1,3 +1,21 @@
+> [!IMPORTANT]
+> ## 本仓库已归档（只读）
+>
+> **引擎已并入主仓 [minecraft-numen](https://github.com/Dwinovo/minecraft-numen) 的 `api/` 子树**，
+> 两仓结构不再维护。此处的代码停留在并仓那一刻，不会再有新提交。
+>
+> - **已发布的制品继续可用** —— [numen-maven](https://github.com/Dwinovo/numen-maven)
+>   不受影响，现有插件（QQ 桥、B 站弹幕桥等）照常拉取，不必改动。
+> - **要跟进新版 API**，请对着主仓的 `api/` 子树编译；它随主仓一起支持
+>   十三个 Minecraft 版本，早已不止这里写的 1.21.1。
+> - **提 issue、开 PR，请到 [主仓](https://github.com/Dwinovo/minecraft-numen/issues)。**
+>   本仓的 issue 与 PR 已全部交代并关闭。
+>
+> *为什么并仓：引擎和 mod 本来就是一起改的，两仓意味着每次改动都要先发一版
+> SNAPSHOT 再回来引用——那条环路的成本早就超过了"独立仓库"带来的好处。*
+
+---
+
 <div align="center">
 
 # Numen API

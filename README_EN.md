@@ -1,3 +1,24 @@
+> [!IMPORTANT]
+> ## This repository is archived (read-only)
+>
+> **The engine now lives in the [minecraft-numen](https://github.com/Dwinovo/minecraft-numen)
+> monorepo under `api/`.** The two-repo layout is no longer maintained; the code here is
+> frozen at the moment of the merge.
+>
+> - **Published artifacts still work** — [numen-maven](https://github.com/Dwinovo/numen-maven)
+>   is unaffected. Existing addons keep resolving exactly as before; nothing to change.
+> - **To build against the current API**, use the `api/` subtree in the monorepo. It ships
+>   for thirteen Minecraft versions now, not just the 1.21.1 documented here.
+> - **File issues and pull requests on the
+>   [monorepo](https://github.com/Dwinovo/minecraft-numen/issues).** Everything open here
+>   has been answered and closed.
+>
+> *Why the merge: the engine and the mod were always edited together. Two repos meant
+> publishing a SNAPSHOT and coming back to consume it on every change — that loop cost
+> more than a separate repository was worth.*
+
+---
+
 <div align="center">
 
 # Numen API
